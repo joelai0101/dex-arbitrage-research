@@ -1,0 +1,49 @@
+{
+  "chain_id": 1,
+  "chain_name": "Ethereum mainnet",
+  "dex_name": "Uniswap v2",
+  "factory_address": "0x5C69bEe701ef814a2B6a3EDD4B1652CB9cc5aA6f",
+  "factory_deployment_block": 10000835,
+  "pair_creation_search_end_block": 10150000,
+  "fee_numerator": 997,
+  "fee_denominator": 1000,
+  "finality_tag": "finalized",
+  "block_count": 1000,
+  "block_batch_size": 50,
+  "event_log_chunk_size": 100,
+  "creation_log_chunk_size": 5000,
+  "warmup_blocks": 2000,
+  "receipt_sample_size": 50,
+  "receipt_sample_minimum": 20,
+  "gas_quantiles": [0.25, 0.5, 0.75],
+  "input_amounts_weth": ["0.01", "0.05", "0.1", "0.5", "1"],
+  "tokens": {
+    "WETH": {
+      "address": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      "expected_decimals": 18
+    },
+    "USDC": {
+      "address": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+      "expected_decimals": 6
+    },
+    "USDT": {
+      "address": "0xdAC17F958D2ee523a2206206994597C13D831ec7",
+      "expected_decimals": 6
+    }
+  },
+  "pairs": [
+    {"pair_id": "WETH_USDC", "token_a": "WETH", "token_b": "USDC"},
+    {"pair_id": "USDC_USDT", "token_a": "USDC", "token_b": "USDT"},
+    {"pair_id": "USDT_WETH", "token_a": "USDT", "token_b": "WETH"}
+  ],
+  "routes": [
+    {
+      "route_id": "WETH_USDC_USDT_WETH",
+      "tokens": ["WETH", "USDC", "USDT", "WETH"]
+    },
+    {
+      "route_id": "WETH_USDT_USDC_WETH",
+      "tokens": ["WETH", "USDT", "USDC", "WETH"]
+    }
+  ]
+}
