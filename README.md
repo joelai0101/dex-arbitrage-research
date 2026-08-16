@@ -18,8 +18,7 @@ preserving the same detection result under controlled inputs.
 
 ```text
 .
-├── experiments/
-│   └── dex_pool_rpc_probe/   # lightweight latest-state RPC smoke test
+├── experiments/               # bounded supporting experiments
 ├── dex_arbitrage_feasibility/ # historical-data feasibility pipeline (PR #1)
 └── rich_trader_benchmark/     # common RICH/TRADER benchmark (PR #2)
 ```
@@ -28,17 +27,20 @@ Only directories already merged into `main` are present in a fresh checkout.
 The latter two components remain in draft pull requests until their evidence,
 protocol, and limitations have been manually reviewed.
 
-## Current component
+## Current data audit
 
-### DEX pool RPC probe
+The active data-validation work belongs to the RICH/TRADER common benchmark in
+PR #2. Its `audit_datasets.py` command verifies the local TRADER UNI1--UNI6
+files before any algorithm result is reported. The audit checks:
 
-`experiments/dex_pool_rpc_probe` is a small read-only smoke test. It queries
-public JSON-RPC endpoints for selected Uniswap, PancakeSwap, and QuickSwap
-pools and records their latest observable state.
+- source commit and access metadata;
+- required filenames, byte sizes, and SHA-256 hashes;
+- mapped-token, graph-row, finite-edge, update-row, and event counts; and
+- row formats and chronological event ordering.
 
-It establishes basic RPC data accessibility only. It does **not** reconstruct
-historical execution order, detect realized arbitrage, or estimate executable
-profit.
+The raw author-provided datasets remain outside Git. The generated audit report
+is local evidence of data integrity and availability; it is not an arbitrage
+detection result or a reconstruction of executable profit.
 
 ## Data and source policy
 
