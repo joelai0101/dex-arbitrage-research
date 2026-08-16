@@ -136,7 +136,7 @@ class RpcClient:
                 data=body,
                 headers={
                     "Content-Type": "application/json",
-                    "User-Agent": "defi-mev-graph-optimization-data-probe/0.1",
+                    "User-Agent": "dex-arbitrage-research-pool-probe/0.1",
                 },
                 method="POST",
             )
