@@ -54,4 +54,3 @@ Local reports are written under `rich_trader_benchmark/artifacts/data_audit/`:
 The artifact directory is ignored by Git because it may include local paths.
 Aggregate counts intended for the thesis should be copied only after this gate
 passes and the data-source wording has been reviewed.
-

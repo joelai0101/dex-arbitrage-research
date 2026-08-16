@@ -136,4 +136,3 @@ class DatasetAuditReport:
     @property
     def passed(self) -> bool:
         return bool(self.datasets) and all(dataset.passed for dataset in self.datasets)
-

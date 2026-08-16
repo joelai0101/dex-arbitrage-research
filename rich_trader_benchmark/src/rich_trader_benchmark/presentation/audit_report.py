@@ -157,4 +157,3 @@ def _markdown(report: DatasetAuditReport) -> str:
 
 def _display(value: int | None) -> str:
     return "--" if value is None else f"{value:,}"
-
