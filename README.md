@@ -19,19 +19,15 @@ preserving the same detection result under controlled inputs.
 ```text
 .
 ├── experiments/               # bounded supporting experiments
-├── dex_arbitrage_feasibility/ # historical-data feasibility pipeline (PR #1)
-└── rich_trader_benchmark/     # common RICH/TRADER benchmark (PR #2)
+├── dex_arbitrage_feasibility/ # historical-data feasibility pipeline
+└── rich_trader_benchmark/     # common RICH/TRADER benchmark
 ```
-
-Only directories already merged into `main` are present in a fresh checkout.
-The latter two components remain in draft pull requests until their evidence,
-protocol, and limitations have been manually reviewed.
 
 ## Current data audit
 
-The active data-validation work belongs to the RICH/TRADER common benchmark in
-PR #2. Its `audit_datasets.py` command verifies the local TRADER UNI1--UNI6
-files before any algorithm result is reported. The audit checks:
+The active data-validation work belongs to the RICH/TRADER common benchmark.
+Its `audit_datasets.py` command verifies the local TRADER UNI1--UNI6 files
+before any algorithm result is reported. The audit checks:
 
 - source commit and access metadata;
 - required filenames, byte sizes, and SHA-256 hashes;
