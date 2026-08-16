@@ -67,6 +67,17 @@ See `docs/data_provenance.md` for the exact interpretation of `inf`, update
 event IDs, and the difference between the RICH and TRADER datasets named UNI1
 through UNI6.
 
+Run the Stage-1 audit from the Git repository root:
+
+```powershell
+python rich_trader_benchmark\scripts\audit_datasets.py `
+    --data-dir "C:\path\to\processed_graph_data_new"
+```
+
+It writes local JSON, CSV, and Markdown reports under
+`rich_trader_benchmark/artifacts/data_audit/`. See `docs/data_audit.md` for the
+inputs, checks, outputs, and interpretation boundary.
+
 ## Planned execution order
 
 1. Validate file hashes, row counts, and event ordering.
