@@ -1,6 +1,17 @@
 # Non-DEX utilities and local caches
 /tools/
 /.matplotlib/
+/.upstream/
+
+# Author-provided datasets are local-only and must not be redistributed
+/processed_graph_data_new/
+/processed_graph_data_new.zip
+/rich_trader_benchmark/data/*
+!/rich_trader_benchmark/data/.gitkeep
+!/rich_trader_benchmark/data/README.md
+/rich_trader_benchmark/external/
+/rich_trader_benchmark/artifacts/
+/rich_trader_benchmark/build/
 
 # Python caches and environments
 **/__pycache__/
@@ -20,6 +31,7 @@
 # Generated data and experiment outputs
 **/data/*
 !**/data/.gitkeep
+!**/data/README.md
 **/output/
 **/outputs/
 **/results/
