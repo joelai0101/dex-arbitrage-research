@@ -60,3 +60,10 @@ detection result or a reconstruction of executable profit.
 
 See each component README for its inputs, outputs, execution command, and
 limitations.
+
+## DELTA terminal
+
+The [DELTA terminal](delta_terminal/README.md) provides an interactive offline
+graph runner and bounded, read-only Ethereum/Uniswap V2 RPC capture. Both use
+the same persistent fixed-color DELTA core. RPC captures can be replayed offline
+for answer-equivalence checks; no wallet or transaction submission is included.
