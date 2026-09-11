@@ -10,6 +10,8 @@
 
 需要 Python 3.12 以上，以及既有 C++17 編譯器。DELTA 僅使用 Python 標準函式庫，無須安裝終端 UI 或 Web3 套件。請使用專案虛擬環境；以下命令在 Git repository 根目錄執行。
 
+[requirements.txt](requirements.txt) 刻意不列套件：DELTA 與測試都只使用標準函式庫。可執行 `python -m pip install -r requirements.txt`，目前不會安裝任何套件。Python 與 C++ 編譯器須另行準備；本機文獻／文件工具不屬於這份 DELTA 依賴清單。
+
 ~~~powershell
 # 先啟用專案環境，或把 python 換成該環境的完整執行檔路徑。
 python -m delta_terminal build
@@ -103,6 +105,7 @@ DELTA 不依賴 `rich_trader_benchmark`、`dex_arbitrage_feasibility` 或原 `ex
 .
 ├── README.md                  # 英文入口
 ├── README.zh-TW.md             # 繁體中文入口
+├── requirements.txt           # 目前沒有第三方 Python 依賴
 ├── delta_terminal/             # DELTA 核心、終端、RPC 轉接與測試
 ├── scripts/                    # 跨平台 shell demo
 └── .github/workflows/          # Ubuntu／macOS 原生編譯與測試

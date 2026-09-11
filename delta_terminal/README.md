@@ -6,6 +6,8 @@
 
 在 repository 根目錄使用專案 Python（本機為外層研究專案的 `.venv/Scripts/python.exe`）：
 
+需要 Python 3.12+ 與 C++17 Clang／GCC。Python 依賴記錄於根目錄 [requirements.txt](../requirements.txt)；目前主程式及測試都只用標準函式庫，沒有第三方套件要安裝。
+
 ```powershell
 python -m delta_terminal build
 python -m delta_terminal

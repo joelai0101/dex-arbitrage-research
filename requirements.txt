@@ -1,0 +1,4 @@
+# DELTA runtime and tests use only the Python standard library.
+# No third-party Python packages are currently required.
+# Prerequisites (not installed by pip): Python 3.12+ and C++17 Clang/GCC.
+# Local research/document tools under tools/ are outside this DELTA manifest.
