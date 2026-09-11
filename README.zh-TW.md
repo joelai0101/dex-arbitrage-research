@@ -6,6 +6,15 @@
 
 [終端機使用指南](delta_terminal/README.md) 說明互動選單、離線圖重播、有限區塊唯讀 Ethereum RPC 擷取與答案一致性測試。作者原始資料、外部 baseline 原始碼與編譯後執行檔不隨 repository 提供。
 
+[小型代幣圖重建器](token_graph_dataset/README.md) 可從已保存的 Uniswap V2 Sync 紀錄生成 DELTA 初始圖與交易層級更新，並與獨立完整枚舉核對。輸入是明確指定的本機來源資料夾；此工具不含新的 RPC 蒐集器，不隨附市場資料。
+
+```sh
+python -m token_graph_dataset build --source SOURCE --blocks 100 --output NEW_CASE
+python -m token_graph_dataset verify --case NEW_CASE --output NEW_VERIFICATION.json
+```
+
+驗證前須先依下方說明編譯 DELTA 核心。完整來源格式、費率、初始化與原始事件追溯規則見重建器指南。
+
 ## 快速開始：DELTA
 
 需要 Python 3.12 以上，以及既有 C++17 編譯器。DELTA 僅使用 Python 標準函式庫，無須安裝終端 UI 或 Web3 套件。請使用專案虛擬環境；以下命令在 Git repository 根目錄執行。
@@ -83,7 +92,7 @@ RPC 圖的邊權為含池費邊際匯率的負自然對數。負環是價格訊�
 ## 測試
 
 ~~~powershell
-python -m unittest delta_terminal.tests.test_terminal -v
+python -m unittest delta_terminal.tests.test_terminal token_graph_dataset.tests.test_dataset -v
 ~~~
 
 測試涵蓋教學案例、獨立窮舉小圖、批次更新、RPC／離線重播、停用池、區塊 hash 改變、錯誤輸入、憑證遮罩、請求上限與失敗狀態。可選的原版執行檔比較需設定：
@@ -103,6 +112,7 @@ python -m unittest delta_terminal.tests.test_terminal -v
 ├── README.zh-TW.md             # 繁體中文入口
 ├── requirements.txt           # 目前沒有第三方 Python 依賴
 ├── delta_terminal/             # DELTA 核心、終端、RPC 轉接與測試
+├── token_graph_dataset/        # 已保存 Sync 紀錄重建小圖與獨立枚舉核對
 ├── scripts/                    # 跨平台 shell demo
 └── .github/workflows/          # Ubuntu／macOS 原生編譯與測試
 ~~~
