@@ -11,6 +11,7 @@ import urllib.error
 from unittest.mock import patch
 
 from delta_terminal.app import run_case
+from delta_terminal.cli import execute, parser
 from delta_terminal.build import PACKAGE
 from delta_terminal.engine import solve
 from delta_terminal.model import Case, load_case, write_case
@@ -93,6 +94,23 @@ class FakeRpc:
 
 
 class TerminalTests(unittest.TestCase):
+    def test_empty_rpc_never_connects_or_writes(self):
+        with tempfile.TemporaryDirectory() as root:
+            output = Path(root)/"cancelled"
+            args = parser().parse_args(["rpc", "--output", str(output)])
+            for value in ("", "   ", "\t\n"):
+                with self.subTest(source="environment", value=repr(value)):
+                    with patch.dict(os.environ, {"DELTA_RPC_URL": value}), patch("delta_terminal.cli.RpcClient") as client, patch("delta_terminal.cli.capture") as capture_rpc:
+                        execute(args)
+                        client.assert_not_called()
+                        capture_rpc.assert_not_called()
+                        self.assertFalse(output.exists())
+                        self.assertFalse(output.with_name(output.name+"_case").exists())
+            with patch.dict(os.environ, {}, clear=True), patch("delta_terminal.cli.getpass.getpass", return_value=" "), patch("delta_terminal.cli.RpcClient") as client:
+                execute(args)
+                client.assert_not_called()
+                self.assertFalse(output.exists())
+
     @unittest.skipUnless(os.environ.get("DELTA_REFERENCE_EXE"), "optional original binary comparison")
     def test_original_binary(self):
         case = load_case(Path(os.environ.get("DELTA_REFERENCE_CASE", PACKAGE / "examples/toy")))

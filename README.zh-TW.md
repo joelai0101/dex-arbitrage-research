@@ -49,7 +49,7 @@ python -m delta_terminal offline --case "C:\data\token_case" --k 5 --batch 100 -
 python -m delta_terminal rpc --blocks 2 --output "C:\results\new_rpc_run"
 ~~~
 
-在隱藏輸入提示中貼上 HTTPS RPC URL，或透過程序環境變數 `DELTA_RPC_URL` 提供。輸入空白則使用設定的 Pocket 公開入口。不要把供應商金鑰提交到 Git，或放入命令列 URL 參數。
+在隱藏輸入提示中貼上 HTTPS RPC URL，或透過程序環境變數 `DELTA_RPC_URL` 提供。URL 留空或只有空白字元時直接取消，不連線、不產生資料，也不切換到備用端點。不要把供應商金鑰提交到 Git，或放入命令列 URL 參數。
 
 此模式擷取有限個已 finalized 的 Ethereum 區塊末快照，再對產生的圖進行增量重播，不是持續訂閱 mempool。預設三個 Uniswap V2 池（USDC／USDT／WETH）、兩個區塊、一組固定著色與 `k=3`。每次最多 64 次唯讀請求，間隔至少兩秒，不自動重試。RPC 不可用時暫緩該模式，離線功能仍可使用。
 
@@ -60,6 +60,23 @@ python -m delta_terminal offline --case "C:\results\new_rpc_run_case" --output "
 ~~~
 
 可用 `--pools` 指定相容池設定；若供應商提供對應歷史狀態，可用 `--start-block` 指定已 finalized 的歷史起點。轉接層假設 Uniswap V2 的 997/1000 費率乘數，每個代幣 pair 僅一個池；遇到平行池會拒絕，不會默默合併。
+
+## 在 macOS／Linux clone 與執行
+
+先準備既有 Python 3.12+、C++17 Clang／GCC，再建立本機虛擬環境；不需要 Windows 執行檔，也不依賴外層研究工作區：
+
+~~~sh
+git clone https://github.com/joelai0101/dex-arbitrage-research.git
+cd dex-arbitrage-research
+python3 -m venv .venv
+. .venv/bin/activate
+sh scripts/demo.sh offline
+sh scripts/demo.sh test
+~~~
+
+[demo 腳本](scripts/README.md) 也支援 `menu` 與 `rpc`。shell 檔固定使用 LF 換行；C++ 核心沒有 Windows API 相依，各平台各自編譯執行檔。只有 `.ps1` 啟動器是 Windows 專用，不是整個應用都只能在 Windows 跑。跨平台 workflow 會在 Ubuntu 與 macOS 編譯、測試；實際通過狀態以當前 PR checks 為準，不把語法可攜性直接當成已驗證執行。
+
+原始 UNI 資料與 Windows baseline 執行檔不隨 repository 提供。新環境可先用內建教學例或 RPC 產生新圖；其他外部 baseline 必須在目標平台另行建置。
 
 ## 正確性與架構
 
@@ -101,6 +118,7 @@ python rich_trader_benchmark/scripts/audit_datasets.py --data-dir "C:\data\proce
 ├── README.md                  # 英文入口
 ├── README.zh-TW.md             # 繁體中文入口
 ├── delta_terminal/             # DELTA 核心、終端、RPC 轉接與測試
+├── scripts/                    # 跨平台 shell demo
 ├── rich_trader_benchmark/      # 資料稽核與 benchmark 規範
 └── experiments/               # 輔助實驗規則
 ~~~

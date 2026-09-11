@@ -11,7 +11,6 @@ import urllib.request
 from .model import Case
 
 DEFAULT_POOLS = Path(__file__).with_name("rpc_pools.json")
-POCKET = "https://eth.api.pocket.network"
 
 
 class RpcUnavailable(RuntimeError):

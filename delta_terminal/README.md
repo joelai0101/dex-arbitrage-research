@@ -22,9 +22,11 @@ python -m delta_terminal rpc --blocks 2 --output NEW_OUTPUT
 python -m unittest delta_terminal.tests.test_terminal -v
 ```
 
-RPC URL 由隱藏輸入或 `DELTA_RPC_URL` 環境變數提供；空白使用 Pocket 公開入口。不把完整 URL 放在命令列參數、設定檔或結果中。使用者可輸入 Alchemy、Pocket 或其他支援相同唯讀方法的 Ethereum HTTPS RPC。本次只驗證 Alchemy 成功；不宣稱 Pocket 目前可用或任何方案額度永遠不變。
+RPC URL 由隱藏輸入或 `DELTA_RPC_URL` 環境變數提供；留空或只有空白字元直接取消，不連線、不產生資料，也不自動改用 Pocket。不把完整 URL 放在命令列參數、設定檔或結果中。使用者可自行輸入 Alchemy、Pocket 或其他支援相同唯讀方法的 Ethereum HTTPS RPC。既有測試只驗證 Alchemy 成功，不代表其他 provider 當前可用。
 
 ## 兩種模式的界線
+
+目前建議把 RPC 當成可溯源的圖資料來源，再用離線重播驗證 DELTA。未來若要真正持續更新，可以獨立加入區塊輪詢或 newHeads／Sync 訂閱；這是唯讀資料接收器，不需要先有交易 bot。mempool pending transaction 不是已完成的池儲備，還需要狀態模擬等額外工作，不是本版 RPC 模式的必要前提。參考 [Geth 訂閱文件](https://geth.ethereum.org/docs/interacting-with-geth/rpc/pubsub)。
 
 - **offline**：讀既有代幣有向圖與更新，在相同回答邊界依序增量維護。不重新取 log、不改權重單位。
 - **rpc**：當次連線擷取最近 N 個 finalized 區塊末儲備，驗證池代幣順序、decimals、區塊 hash 與相鄰 parent hash，形成新圖，再交給相同引擎增量回放；同時另存 `<output>_case`，可直接給 offline。也可用 `--start-block` 指定已 finalized 歷史起點，前提是 provider 支援該歷史狀態。
@@ -55,6 +57,10 @@ API／合約依據：[Ethereum JSON-RPC 區塊參數](https://ethereum.org/en/de
 
 終端顯示前 10 筆、每 1,000 筆與最後一筆；**全部答案**均在 `results.json`。輸出目錄必須是新目錄；中途失敗標示為「失敗／中止」，不冒充成功結果。
 
+## 跨平台啟動
+
+跨平台 demo 集中在 repository 的 [scripts/](../scripts/README.md)。macOS／Linux 以 Python 3.12+ 與 C++17 Clang／GCC 重新編譯；不要複製 Windows `.exe` 或 DLL。Windows 保留 `start.ps1`，其他平台使用 `sh scripts/demo.sh`。
+
 ## 是否需要 SOLID／Design Pattern／Clean Architecture 重構？
 
 需要有限分層，不需要全案重寫或新增框架：
@@ -73,7 +79,7 @@ API／合約依據：[Ethereum JSON-RPC 區塊參數](https://ethereum.org/en/de
 
 ## 驗證
 
-10 項測試涵蓋既有教學 fixture、12 個 seed × 3 批次模式的獨立窮舉核對、RPC fixture 匯出／回放、零儲備刪邊、hash 改變、輸入錯誤、請求上限、祕密遮罩及失敗狀態。原版 binary 比較可選：
+11 項測試涵蓋既有教學 fixture、12 個 seed × 3 批次模式的獨立窮舉核對、RPC fixture 匯出／回放、空白 URL 取消且不連線／寫檔、零儲備刪邊、hash 改變、輸入錯誤、請求上限、祕密遮罩及失敗狀態。原版 binary 比較可選：
 
 ```powershell
 $env:DELTA_REFERENCE_EXE = 'PATH_TO_ORIGINAL_DELTA_EXE'
@@ -82,4 +88,4 @@ python -m unittest delta_terminal.tests.test_terminal -v
 
 可用 `DELTA_REFERENCE_CASE` 指定已匯出的 RPC 小圖，再執行 `test_original_binary`；該測試含獨立 DFS，只應用於小圖，避免誤拿大圖做窮舉。
 
-2026-09-11 本機驗收：10 項通過；新舊教學例的 9 個回答點完全一致。Alchemy 區塊 25,952,744–25,952,745、3 池、21 請求成功；RPC 與離線兩個回答點之列號、權重及路徑完全相同，亦與原 binary／獨立 DFS 相符。最優權重均為 +0.007312742606632838，沒有負環訊號。這是功能測試，不是新的速度 benchmark。
+2026-09-11 Windows 本機驗收：11 項通過；新舊教學例的 9 個回答點完全一致；`sh scripts/demo.sh offline` 編譯並完成教學案例。Alchemy 區塊 25,952,744–25,952,745、3 池、21 請求成功；RPC 與離線兩個回答點之列號、權重及路徑完全相同，亦與原 binary／獨立 DFS 相符。最優權重均為 +0.007312742606632838，沒有負環訊號。這是功能測試，不是新的速度 benchmark。

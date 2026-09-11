@@ -1,0 +1,37 @@
+name: DELTA portability
+
+on:
+  pull_request:
+    paths:
+      - 'delta_terminal/**'
+      - 'scripts/**'
+      - '.gitattributes'
+      - '.github/workflows/delta-portability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-demo:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Shell syntax
+        run: sh -n scripts/demo.sh
+      - name: Build and test (offline, no secrets)
+        run: sh scripts/demo.sh test
+      - name: Offline demo
+        run: sh scripts/demo.sh offline
+      - name: Blank RPC URL must cancel
+        env:
+          DELTA_RPC_URL: ''
+        run: python -m delta_terminal rpc
