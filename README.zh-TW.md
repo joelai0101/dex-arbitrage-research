@@ -2,20 +2,9 @@
 
 [English](README.md) | [繁體中文](README.zh-TW.md)
 
-本專案提供可重現的代幣圖實驗與去中心化交易所（Decentralized Exchange, DEX）循環增量維護工具；此版本包含 DELTA 終端機應用，以及 RICH／TRADER 資料稽核基礎。
+本專案提供可重現的代幣圖實驗與去中心化交易所（Decentralized Exchange, DEX）循環增量維護工具；此版本聚焦 DELTA 終端機、原生核心、資料轉接、範例與正確性測試。
 
-## 目前可以執行什麼？
-
-| 模組 | 已具備功能 | 說明 |
-|---|---|---|
-| DELTA 終端機 | 互動選單、離線圖重播、有限區塊唯讀 Ethereum RPC 擷取、答案一致性測試 | [終端機使用指南](delta_terminal/README.md) |
-| DEX 資料可行性 | 獨立 Uniswap V2 資料擷取，以及考量 gas／價格衝擊的三角路徑模擬 | [資料可行性指南](dex_arbitrage_feasibility/README.md) |
-| RICH／TRADER benchmark | UNI1–UNI6 來源與資料稽核、實驗規範、結果格式 | [Benchmark 指南](rich_trader_benchmark/README.md) |
-| 輔助實驗 | 範圍明確、可重現的研究實驗 | [實驗規則](experiments/README.md) |
-
-其他尚未合併分支中的 benchmark 執行器、CCSS 評估與相依狀態剖析，不自動包含於此版本。作者原始資料、外部 baseline 原始碼與編譯後執行檔不隨 repository 提供。
-
-`dex_arbitrage_feasibility` 保留作獨立研究模組，DELTA 不依賴它。較早的 `dex_data_probe` 已自 `main` 退役；本機歷史分支仍可能保留該目錄及其資料。
+[終端機使用指南](delta_terminal/README.md) 說明互動選單、離線圖重播、有限區塊唯讀 Ethereum RPC 擷取與答案一致性測試。作者原始資料、外部 baseline 原始碼與編譯後執行檔不隨 repository 提供。
 
 ## 快速開始：DELTA
 
@@ -104,15 +93,9 @@ python -m unittest delta_terminal.tests.test_terminal -v
 
 `DELTA_REFERENCE_CASE` 可指定其他小圖；此比較也會進行完整窮舉，因此不要用於大圖。具日期的本機驗收結果見終端機指南；這些是功能測試，不是效能 benchmark。
 
-## RICH／TRADER 資料稽核
+## 歷史研究模組
 
-請另行取得 TRADER 作者資料，保存在 Git 之外，再執行：
-
-~~~powershell
-python rich_trader_benchmark/scripts/audit_datasets.py --data-dir "C:\data\processed_graph_data_new" --output-dir "C:\results\data_audit"
-~~~
-
-也可設定 `TRADER_UNI_DATA_DIR`。稽核會檢查來源、檔案清單身分、格式、數量與事件順序，輸出 JSON／CSV／Markdown 報告。資料稽核通過不代表已證明套利結果。解讀量測前，請先閱讀[資料來源](rich_trader_benchmark/docs/data_provenance.md)、[稽核細節](rich_trader_benchmark/docs/data_audit.md)與[實驗規範](rich_trader_benchmark/docs/experiment_protocol.md)。
+DELTA 不依賴 `rich_trader_benchmark`、`dex_arbitrage_feasibility` 或原 `experiments` 目錄。這些獨立研究模組保留在[整理前的 Git 快照](https://github.com/joelai0101/dex-arbitrage-research/tree/fe82afbdc05fcfadebf705f95db9b32dd26661a4)，不放在目前聚焦 DELTA 的程式樹；`dex_data_probe` 已於更早版本退役。移出目前程式樹不會刪除其 Git 歷史或外部研究資料。
 
 ## 目錄結構
 
@@ -122,8 +105,7 @@ python rich_trader_benchmark/scripts/audit_datasets.py --data-dir "C:\data\proce
 ├── README.zh-TW.md             # 繁體中文入口
 ├── delta_terminal/             # DELTA 核心、終端、RPC 轉接與測試
 ├── scripts/                    # 跨平台 shell demo
-├── rich_trader_benchmark/      # 資料稽核與 benchmark 規範
-└── experiments/               # 輔助實驗規則
+└── .github/workflows/          # Ubuntu／macOS 原生編譯與測試
 ~~~
 
 外層研究工作區的 `6D/doc`、`6D/pdf` 等資料夾不屬於此 Git repository。

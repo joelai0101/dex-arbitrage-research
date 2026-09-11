@@ -2,11 +2,6 @@ name: DELTA portability
 
 on:
   pull_request:
-    paths:
-      - 'delta_terminal/**'
-      - 'scripts/**'
-      - '.gitattributes'
-      - '.github/workflows/delta-portability.yml'
   workflow_dispatch:
 
 permissions:
