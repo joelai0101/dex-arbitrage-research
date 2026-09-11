@@ -9,10 +9,13 @@ Research software for reproducible token-graph experiments and incremental cycle
 | Component | Available functionality | Guide |
 |---|---|---|
 | DELTA terminal | Interactive menu, offline graph replay, bounded read-only Ethereum RPC capture, answer-equivalence tests | [Terminal guide (繁體中文)](delta_terminal/README.md) |
+| DEX data feasibility | Independent Uniswap V2 data capture and gas/price-impact-aware triangular-route simulation | [Feasibility guide](dex_arbitrage_feasibility/README.md) |
 | RICH/TRADER benchmark | UNI1–UNI6 source/data audit, experiment protocol, result schema | [Benchmark guide](rich_trader_benchmark/README.md) |
 | Supporting experiments | Scoped, reproducible research experiments | [Experiment policy](experiments/README.md) |
 
-Benchmark execution, CCSS evaluation, dependency profiling, and historical feasibility work on other unmerged branches are not automatically included in this checkout. Raw author datasets, external baseline source trees, compiled binaries, and generated results are not bundled.
+Benchmark execution, CCSS evaluation, and dependency profiling on other unmerged branches are not automatically included in this checkout. Raw author datasets, external baseline source trees, and compiled binaries are not bundled.
+
+`dex_arbitrage_feasibility` is retained as an independent research module, not a DELTA dependency. The older `dex_data_probe` has been retired from `main`; a historical local branch may still contain it and its local data.
 
 ## Quick start: DELTA
 

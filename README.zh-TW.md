@@ -9,10 +9,13 @@
 | 模組 | 已具備功能 | 說明 |
 |---|---|---|
 | DELTA 終端機 | 互動選單、離線圖重播、有限區塊唯讀 Ethereum RPC 擷取、答案一致性測試 | [終端機使用指南](delta_terminal/README.md) |
+| DEX 資料可行性 | 獨立 Uniswap V2 資料擷取，以及考量 gas／價格衝擊的三角路徑模擬 | [資料可行性指南](dex_arbitrage_feasibility/README.md) |
 | RICH／TRADER benchmark | UNI1–UNI6 來源與資料稽核、實驗規範、結果格式 | [Benchmark 指南](rich_trader_benchmark/README.md) |
 | 輔助實驗 | 範圍明確、可重現的研究實驗 | [實驗規則](experiments/README.md) |
 
-其他尚未合併分支中的 benchmark 執行器、CCSS 評估、相依狀態剖析與歷史資料可行性工作，不自動包含於此版本。作者原始資料、外部 baseline 原始碼、編譯後執行檔及產生的結果均不隨 repository 提供。
+其他尚未合併分支中的 benchmark 執行器、CCSS 評估與相依狀態剖析，不自動包含於此版本。作者原始資料、外部 baseline 原始碼與編譯後執行檔不隨 repository 提供。
+
+`dex_arbitrage_feasibility` 保留作獨立研究模組，DELTA 不依賴它。較早的 `dex_data_probe` 已自 `main` 退役；本機歷史分支仍可能保留該目錄及其資料。
 
 ## 快速開始：DELTA
 
