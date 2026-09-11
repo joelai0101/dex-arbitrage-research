@@ -10,6 +10,8 @@ The [terminal guide (繁體中文)](delta_terminal/README.md) covers the interac
 
 Requirements: Python 3.12+ and an existing C++17 compiler. DELTA uses the Python standard library; no terminal-UI or Web3 package installation is required. Use a project-local virtual environment. Run the following commands from the Git repository root:
 
+[requirements.txt](requirements.txt) intentionally has no package entries: both DELTA and its tests use only the standard library. `python -m pip install -r requirements.txt` is supported and currently installs nothing. Python and the C++ compiler must be prepared separately; local research/document tools are outside this manifest.
+
 ~~~powershell
 # Activate your project environment, or replace python with its full path.
 python -m delta_terminal build
@@ -103,6 +105,7 @@ DELTA does not depend on `rich_trader_benchmark`, `dex_arbitrage_feasibility`, o
 .
 ├── README.md                  # English entry point
 ├── README.zh-TW.md             # Traditional Chinese entry point
+├── requirements.txt           # No third-party Python dependencies
 ├── delta_terminal/             # DELTA core, terminal, RPC adapter, tests
 ├── scripts/                    # Cross-platform shell demos
 └── .github/workflows/          # Native build and tests on Ubuntu/macOS
