@@ -63,7 +63,7 @@ def read_source(folder, start, blocks):
             "snapshots": snapshots, "archive_checks": anchors}
 
 
-def reconstruct(source, k=3):
+def reconstruct(source, k=3, colors=None):
     start, end = source["start_block"], source["end_block"]
     require(2 <= k <= 5, "Small-graph validation supports k=2-5")
     headers = sorted(source["blocks"], key=lambda row: int(row["block_number"]))
@@ -76,16 +76,24 @@ def reconstruct(source, k=3):
         require(number == start or parent == block_hashes[number-1], "Block parent hash mismatch")
 
     pools, tokens, pairs = {}, {}, set()
-    require(1 <= len(source["pools"]) <= 8, "Small datasets support 1-8 pools")
+    rpc_source = source.get("schema") == "rpc_uniswap_v2_v1"
+    require(1 <= len(source["pools"]) <= 10, "Small datasets support 1-10 pools")
     for row in source["pools"]:
         pool = address(row["pair_address"])
         pair = tuple(address(row[f"token{i}_address"]) for i in (0, 1))
         require(pair[0] < pair[1] and pair not in pairs and pool not in pools, "Invalid, duplicate or parallel pool")
         require(int(row["chain_id"]) == 1 and row["dex_name"] == "Uniswap v2", "Invalid pool protocol")
         require((int(row["fee_numerator"]), int(row["fee_denominator"])) == (997, 1000), "Unsupported pool fee")
-        require(row["factory_get_pair_verified"] == "True" and row["creation_event_verified"] == "True", "Pool identity was not verified in source")
-        require(address(row["creation_event_pair_address"]) == pool and int(row["creation_block"]) <= start, "Pool creation does not match selected universe")
-        hash_value(row["creation_transaction_hash"])
+        require(row["factory_get_pair_verified"] == "True", "Pool identity was not verified in source")
+        if rpc_source:
+            require(row["identity_method"] == "factory_getPair_at_block" and int(row["identity_block"]) == start,
+                    "RPC pool identity must be checked at the initial block")
+            require(address(row["factory_address"]) == "0x5c69bee701ef814a2b6a3edd4b1652cb9cc5aa6f" and row["token_order_verified"] == "True",
+                    "RPC Factory or token-order verification missing")
+        else:
+            require(row["creation_event_verified"] == "True", "Pool creation event was not verified in source")
+            require(address(row["creation_event_pair_address"]) == pool and int(row["creation_block"]) <= start, "Pool creation does not match selected universe")
+            hash_value(row["creation_transaction_hash"])
         for i, token in enumerate(pair):
             item = {"address": token, "symbol": row[f"token{i}_symbol"], "decimals": int(row[f"token{i}_decimals"])}
             require(0 <= item["decimals"] <= 36, "Invalid token decimals")
@@ -126,7 +134,8 @@ def reconstruct(source, k=3):
         require(int(row["chain_id"]) == 1, "Snapshot chain mismatch")
         require(tuple(address(row[f"token{i}_address"]) for i in (0, 1)) == pools[key[1]], "Snapshot token order mismatch")
         checkpoints[key] = reserves(row)
-    require(len(checkpoints) == len(pools)*(end-start+1), "Incomplete block-end checkpoint coverage")
+    expected_blocks = {start, end} if rpc_source else set(range(start, end+1))
+    require(set(checkpoints) == {(n, pool) for n in expected_blocks for pool in pools}, "Incomplete block-end checkpoint coverage")
 
     archive = {}
     for row in source["archive_checks"]:
@@ -139,15 +148,27 @@ def reconstruct(source, k=3):
     require(all((start, pool) in archive for pool in pools), "Initial state needs historical getReserves anchors for every pool; choose an anchored start block")
 
     state, initial_events = {}, {}
-    for event in events:
-        if event["block_number"] <= start:
-            state[event["pool"]] = event["reserves"]
-            initial_events[event["pool"]] = event
+    if rpc_source:
+        for observation in source["initial_reserves"]:
+            pool = address(observation["pool"])
+            require(pool in pools and pool not in state, "Invalid initial reserve key")
+            require(observation["state_source"] == "eth_call_getReserves" and observation["block_number"] == start
+                    and hash_value(observation["block_hash"]) == block_hashes[start], "Invalid initial reserve provenance")
+            values = observation["reserves"]
+            require(len(values) == 2 and all(type(v) is int and 0 <= v < 2**112 for v in values), "Invalid initial reserve values")
+            state[pool] = values
+        require(all(event["block_number"] > start for event in events), "RPC updates must follow the initial block")
+    else:
+        for event in events:
+            if event["block_number"] <= start:
+                state[event["pool"]] = event["reserves"]
+                initial_events[event["pool"]] = event
     require(set(state) == set(pools), "Missing initial Sync observation; do not fill missing reserves")
 
     def check_block(number):
         for pool, value in state.items():
-            require(value == checkpoints[number, pool], f"Reconstructed block-end reserves mismatch at {number}, {pool}")
+            if (number, pool) in checkpoints:
+                require(value == checkpoints[number, pool], f"Reconstructed block-end reserves mismatch at {number}, {pool}")
 
     def edges(pool):
         a, b = pools[pool]
@@ -187,6 +208,13 @@ def reconstruct(source, k=3):
                 "color_rule": "sorted token ID modulo k; fixed coloring, not a global guarantee",
                 "checks": {"block_end_reserve_matches": len(checkpoints), "historical_call_matches": len(archive),
                            "update_sync_events": len(window), "transaction_batches": len(boundaries)}}
-    case = Case(k, [i % k for i in range(len(nodes))], graph, updates, boundaries, metadata)
+    if rpc_source:
+        metadata["source"] = "rpc_uniswap_v2_sync_transactions"
+        metadata["initial_reserves"] = source["initial_reserves"]
+    if colors is not None:
+        require(len(colors) == len(nodes), "Explicit coloring must contain exactly one color per token")
+        metadata["color_rule"] = "explicit fixed coloring"
+        metadata["colors"] = list(colors)
+    case = Case(k, list(colors) if colors is not None else [i % k for i in range(len(nodes))], graph, updates, boundaries, metadata)
     case.validate()
     return case

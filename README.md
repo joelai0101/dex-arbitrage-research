@@ -57,14 +57,16 @@ Use `--pools` for a compatible pool configuration and `--start-block` for a fina
 
 ## Small datasets from recorded chain events
 
-See also the [small token-graph dataset builder](token_graph_dataset/README.md): it reconstructs recorded Uniswap V2 Sync events into DELTA cases, groups updates at complete-transaction boundaries, and checks small graphs against independent exhaustive cycle oracles. It consumes an explicit local source folder; it does not fetch new RPC data or bundle market records.
+The [small token-graph dataset builder](token_graph_dataset/README.md) reconstructs recorded Uniswap V2 Sync events into DELTA cases and provides bounded read-only RPC capture for five preselected tokens. Updates are atomic at complete-transaction boundaries. The k=4/5 pilot uses deterministic full color coverage and independent exhaustive cycle oracles. Market records are not bundled.
 
 ```sh
 python -m token_graph_dataset build --source SOURCE --blocks 100 --output NEW_CASE
 python -m token_graph_dataset verify --case NEW_CASE --output NEW_VERIFICATION.json
+python -m token_graph_dataset capture --blocks 100 --output NEW_CAPTURE
+python -m token_graph_dataset verify-cover --source-json NEW_CAPTURE/source.json --k 4 5 --output NEW_COVER
 ```
 
-Build the DELTA core before verification, as shown in Quick start above.
+Build the DELTA core before verification, as shown in Quick start above. Capture requires an explicit HTTPS RPC URL through a hidden prompt or `DELTA_RPC_URL`; blank cancels, and there is no automatic provider fallback. It retains successful response envelopes, validates initial/final reserve anchors, and stops on any RPC error. Passing synthetic tests does not establish a live-market negative-cycle finding.
 
 ## Clone on macOS / Linux
 
@@ -94,7 +96,7 @@ The terminal preserves the validated DELTA recurrence. The native engine, proces
 ## Tests
 
 ~~~powershell
-python -m unittest delta_terminal.tests.test_terminal token_graph_dataset.tests.test_dataset -v
+python -m unittest delta_terminal.tests.test_terminal token_graph_dataset.tests.test_dataset token_graph_dataset.tests.test_collect -v
 ~~~
 
 Tests cover the teaching fixture, independently enumerated small graphs, batching, RPC-to-offline replay, inactive pools, block-hash changes, invalid input, credential redaction, request limits, and failed-run status. The optional original-binary comparison requires:

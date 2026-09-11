@@ -23,7 +23,7 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class RpcClient:
-    def __init__(self, url, *, interval=2.0, budget=64, opener=None):
+    def __init__(self, url, *, interval=2.0, budget=64, opener=None, on_response=None):
         parsed = urllib.parse.urlsplit(url)
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.fragment:
             raise ValueError("RPC 須為 HTTPS URL，不接受帳密 user-info 或 fragment。")
@@ -32,9 +32,10 @@ class RpcClient:
         self.interval, self.budget = interval, budget
         self.calls, self.last = 0, None
         self.opener = opener or urllib.request.build_opener(NoRedirect())
+        self.on_response = on_response
 
     def call(self, method, params):
-        if method not in {"eth_chainId", "eth_getBlockByNumber", "eth_call"}:
+        if method not in {"eth_chainId", "eth_getBlockByNumber", "eth_call", "eth_getLogs"}:
             raise ValueError("此介面只允許唯讀 RPC 方法。")
         if self.calls >= self.budget:
             raise RpcUnavailable("本次 RPC 請求額度已用完；已停止，不自動重試。")
@@ -54,6 +55,8 @@ class RpcClient:
             raise RpcUnavailable("RPC 連線或回應格式失敗；已暫緩，不自動重試。") from None
         if not isinstance(data, dict) or data.get("id") != self.calls or "error" in data or "result" not in data:
             raise RpcUnavailable(f"RPC {method} 未回傳有效結果；已暫緩。")
+        if self.on_response:
+            self.on_response(method, params, data)
         return data["result"]
 
 

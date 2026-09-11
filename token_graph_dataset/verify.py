@@ -6,8 +6,8 @@ import math
 from delta_terminal.engine import solve
 
 
-def minimum_cycle(graph, nodes, k, colors=None):
-    best, witness = None, []
+def minimum_cycle(graph, nodes, k, colors=None, rates=None):
+    best, best_product, witness = None, None, []
     for vertices in permutations(range(nodes), k):
         if vertices[0] != min(vertices):
             continue  # Remove rotations, retaining both directed orientations.
@@ -17,8 +17,11 @@ def minimum_cycle(graph, nodes, k, colors=None):
         edges = list(zip(path, path[1:]))
         if all(edge in graph for edge in edges):
             weight = math.fsum(graph[edge] for edge in edges)
-            if best is None or weight < best:
+            product = math.prod(rates[edge] for edge in edges) if rates is not None else None
+            improves = (best_product is None or product > best_product) if rates is not None else (best is None or weight < best)
+            if improves:
                 best, witness = weight, path
+                best_product = product
     return {"weight": best, "path": witness}
 
 
@@ -33,7 +36,7 @@ def verify(case):
     if [answer["row"] for answer in answers] != [0] + case.boundaries:
         raise ValueError("DELTA returned wrong answer boundaries")
     graph = {(u, v): w for u, v, w in case.graph}
-    state = {event["pool"]: event["reserves"] for event in case.metadata["initial_events"]}
+    state = {event["pool"]: event["reserves"] for event in case.metadata.get("initial_reserves", case.metadata["initial_events"])}
     ids = {node["address"]: node["id"] for node in case.metadata["nodes"]}
     pool_pairs = {pool["pair_address"].lower(): tuple(ids[pool[f"token{i}_address"].lower()] for i in (0, 1)) for pool in case.metadata["pools"]}
     transactions = {row["row"]: row for row in case.metadata["transactions"]}
@@ -47,8 +50,15 @@ def verify(case):
         previous = answer["row"]
         for event in transactions.get(previous, {}).get("events", []):
             state[event["pool"]] = event["reserves"]
-        restricted = minimum_cycle(graph, len(case.colors), case.k, case.colors)
-        global_best = minimum_cycle(graph, len(case.colors), case.k)
+        # On a closed cycle decimal units cancel. Rank oracle cycles with exact
+        # reserve products, so float cancellation cannot hide a near-zero signal.
+        rates = {}
+        for pool, (u, v) in pool_pairs.items():
+            a, b = state[pool]
+            if a and b:
+                rates[u, v], rates[v, u] = Fraction(997*b, 1000*a), Fraction(997*a, 1000*b)
+        restricted = minimum_cycle(graph, len(case.colors), case.k, case.colors, rates)
+        global_best = minimum_cycle(graph, len(case.colors), case.k, rates=rates)
         if not equal_weight(answer["weight"], restricted["weight"]):
             raise ValueError(f"DELTA/oracle mismatch at row {previous}")
         path = answer["path"]
@@ -59,13 +69,6 @@ def verify(case):
                 raise ValueError("DELTA witness weight mismatch")
         elif path:
             raise ValueError("Null answer has a nonempty path")
-        # Along a closed cycle decimal units cancel. Exact rational reserve products
-        # independently determine the price-signal sign, including near-zero cases.
-        rates = {}
-        for pool, (u, v) in pool_pairs.items():
-            a, b = state[pool]
-            if a and b:
-                rates[u, v], rates[v, u] = Fraction(997*b, 1000*a), Fraction(997*a, 1000*b)
         def product(witness):
             if not witness:
                 return None
@@ -76,10 +79,13 @@ def verify(case):
                         "global_weight_matched": equal_weight(answer["weight"], global_best["weight"]),
                         "global_negative_exact": gp is not None and gp > 1,
                         "delta_negative_exact": dp is not None and dp > 1,
-                        "global_rate_product": str(gp) if gp is not None else None})
+                        "global_product_matched": gp == dp,
+                        "global_rate_product": str(gp) if gp is not None else None,
+                        "delta_rate_product": str(dp) if dp is not None else None})
     return {"status": "passed", "k": case.k, "nodes": len(case.colors),
             "answers_checked": len(results), "restricted_matches": len(results),
             "global_matches": sum(row["global_weight_matched"] for row in results),
+            "global_candidate_states": sum(row["global_oracle"]["weight"] is not None for row in results),
             "global_negative_states": sum(row["global_negative_exact"] for row in results),
             "delta_negative_states": sum(row["delta_negative_exact"] for row in results),
             "results": results}

@@ -40,6 +40,6 @@ export PYTHONIOENCODING=utf-8
 "$PYTHON" -m delta_terminal build
 case "$MODE" in
     menu) exec "$PYTHON" -m delta_terminal "$@" ;;
-    test) exec "$PYTHON" -m unittest delta_terminal.tests.test_terminal token_graph_dataset.tests.test_dataset -v "$@" ;;
+    test) exec "$PYTHON" -m unittest delta_terminal.tests.test_terminal token_graph_dataset.tests.test_dataset token_graph_dataset.tests.test_collect -v "$@" ;;
     *) exec "$PYTHON" -m delta_terminal "$MODE" "$@" ;;
 esac

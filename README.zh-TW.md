@@ -6,14 +6,16 @@
 
 [終端機使用指南](delta_terminal/README.md) 說明互動選單、離線圖重播、有限區塊唯讀 Ethereum RPC 擷取與答案一致性測試。作者原始資料、外部 baseline 原始碼與編譯後執行檔不隨 repository 提供。
 
-[小型代幣圖重建器](token_graph_dataset/README.md) 可從已保存的 Uniswap V2 Sync 紀錄生成 DELTA 初始圖與交易層級更新，並與獨立完整枚舉核對。輸入是明確指定的本機來源資料夾；此工具不含新的 RPC 蒐集器，不隨附市場資料。
+[小型代幣圖重建器](token_graph_dataset/README.md) 可從已保存的 Uniswap V2 Sync 紀錄生成 DELTA 初始圖與交易層級更新，也提供五個事前固定代幣的唯讀 RPC 蒐集器。k=4／5 以確定性的完整小圖著色覆蓋與獨立全圖枚舉核對，不隨附市場原始資料。
 
 ```sh
 python -m token_graph_dataset build --source SOURCE --blocks 100 --output NEW_CASE
 python -m token_graph_dataset verify --case NEW_CASE --output NEW_VERIFICATION.json
+python -m token_graph_dataset capture --blocks 100 --output NEW_CAPTURE
+python -m token_graph_dataset verify-cover --source-json NEW_CAPTURE/source.json --k 4 5 --output NEW_COVER
 ```
 
-驗證前須先依下方說明編譯 DELTA 核心。完整來源格式、費率、初始化與原始事件追溯規則見重建器指南。
+驗證前須先依下方說明編譯 DELTA 核心。RPC 由隱藏提示或 `DELTA_RPC_URL` 明確提供，空白取消、不自動切換 provider。保存成功回應 JSON、核對起訖準備金，錯誤立即停止；合成測試通過不等於已在真實市場找到負環。完整來源格式、費率、初始化與追溯規則見重建器指南。
 
 ## 快速開始：DELTA
 
@@ -92,7 +94,7 @@ RPC 圖的邊權為含池費邊際匯率的負自然對數。負環是價格訊�
 ## 測試
 
 ~~~powershell
-python -m unittest delta_terminal.tests.test_terminal token_graph_dataset.tests.test_dataset -v
+python -m unittest delta_terminal.tests.test_terminal token_graph_dataset.tests.test_dataset token_graph_dataset.tests.test_collect -v
 ~~~
 
 測試涵蓋教學案例、獨立窮舉小圖、批次更新、RPC／離線重播、停用池、區塊 hash 改變、錯誤輸入、憑證遮罩、請求上限與失敗狀態。可選的原版執行檔比較需設定：
