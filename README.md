@@ -9,10 +9,13 @@ Research software for reproducible token-graph experiments and incremental cycle
 | Component | Available functionality | Guide |
 |---|---|---|
 | DELTA terminal | Interactive menu, offline graph replay, bounded read-only Ethereum RPC capture, answer-equivalence tests | [Terminal guide (繁體中文)](delta_terminal/README.md) |
+| DEX data feasibility | Independent Uniswap V2 data capture and gas/price-impact-aware triangular-route simulation | [Feasibility guide](dex_arbitrage_feasibility/README.md) |
 | RICH/TRADER benchmark | UNI1–UNI6 source/data audit, experiment protocol, result schema | [Benchmark guide](rich_trader_benchmark/README.md) |
 | Supporting experiments | Scoped, reproducible research experiments | [Experiment policy](experiments/README.md) |
 
-Benchmark execution, CCSS evaluation, dependency profiling, and historical feasibility work on other unmerged branches are not automatically included in this checkout. Raw author datasets, external baseline source trees, compiled binaries, and generated results are not bundled.
+Benchmark execution, CCSS evaluation, and dependency profiling on other unmerged branches are not automatically included in this checkout. Raw author datasets, external baseline source trees, and compiled binaries are not bundled.
+
+`dex_arbitrage_feasibility` is retained as an independent research module, not a DELTA dependency. The older `dex_data_probe` has been retired from `main`; a historical local branch may still contain it and its local data.
 
 ## Quick start: DELTA
 
@@ -49,7 +52,7 @@ The terminal displays a sample; `results.json` retains every answer, witness pat
 python -m delta_terminal rpc --blocks 2 --output "C:\results\new_rpc_run"
 ~~~
 
-Enter an HTTPS RPC URL at the hidden prompt, or provide it through the process environment variable `DELTA_RPC_URL`. An empty prompt uses the configured Pocket public endpoint. Do not commit provider keys or put them in command-line URL arguments.
+Enter an HTTPS RPC URL at the hidden prompt, or provide it through the process environment variable `DELTA_RPC_URL`. A blank or whitespace-only URL cancels without making requests or writing data; there is no fallback endpoint. Do not commit provider keys or put them in command-line URL arguments.
 
 This mode captures a bounded sequence of finalized Ethereum block-end snapshots, then incrementally replays the resulting graph; it is not a continuous mempool subscription. Defaults are three Uniswap V2 pools (USDC/USDT/WETH), two blocks, one fixed coloring, and `k=3`. Each run permits at most 64 read-only requests, at least two seconds apart, without automatic retries. An unavailable RPC pauses that mode; offline replay remains available.
 
@@ -60,6 +63,23 @@ python -m delta_terminal offline --case "C:\results\new_rpc_run_case" --output "
 ~~~
 
 Use `--pools` for a compatible pool configuration and `--start-block` for a finalized historical starting block, if the provider serves that state. The adapter assumes Uniswap V2's 997/1000 fee multiplier and one pool per token pair; parallel pools are rejected rather than silently merged.
+
+## Clone on macOS / Linux
+
+Use an existing Python 3.12+ and C++17 Clang/GCC installation, then create a local environment. No Windows binary or external research-workspace directory is required:
+
+~~~sh
+git clone https://github.com/joelai0101/dex-arbitrage-research.git
+cd dex-arbitrage-research
+python3 -m venv .venv
+. .venv/bin/activate
+sh scripts/demo.sh offline
+sh scripts/demo.sh test
+~~~
+
+The [demo script](scripts/README.md) also supports `menu` and `rpc`. Shell files use LF line endings. The C++ core contains no Windows API dependency; each platform builds its own executable. The `.ps1` launcher is Windows-specific, not the application itself. The portability workflow builds and tests on Ubuntu and macOS; consult the current PR checks for actual results rather than assuming that portable syntax proves execution.
+
+The existing raw UNI datasets and Windows baseline executables are not bundled. Start with the included teaching case or create a new RPC case; rebuild any external baselines separately on their target platform.
 
 ## Correctness and architecture
 
@@ -101,6 +121,7 @@ Alternatively set `TRADER_UNI_DATA_DIR`. The audit checks provenance, manifest i
 ├── README.md                  # English entry point
 ├── README.zh-TW.md             # Traditional Chinese entry point
 ├── delta_terminal/             # DELTA core, terminal, RPC adapter, tests
+├── scripts/                    # Cross-platform shell demos
 ├── rich_trader_benchmark/      # Dataset audit and benchmark specification
 └── experiments/               # Supporting experiment policy
 ~~~

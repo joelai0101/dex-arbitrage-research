@@ -10,14 +10,14 @@ EXECUTABLE = PACKAGE / "build" / ("delta.exe" if os.name == "nt" else "delta")
 
 
 def build(compiler=None):
-    if compiler is None:
+    if compiler is None and os.name == "nt":
         for parent in PACKAGE.parents:
             candidate = parent / ".venv/toolchains/llvm-mingw-20260616-ucrt-x86_64/bin/clang++.exe"
             if candidate.is_file():
                 compiler = str(candidate)
                 break
-        else:
-            compiler = shutil.which("clang++") or shutil.which("g++")
+    if compiler is None:
+        compiler = shutil.which("clang++") or shutil.which("g++")
     if not compiler:
         raise RuntimeError("找不到 C++17 編譯器，請使用 build --compiler 指定既有編譯器。")
     EXECUTABLE.parent.mkdir(exist_ok=True)

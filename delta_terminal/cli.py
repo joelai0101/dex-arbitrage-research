@@ -8,7 +8,7 @@ import sys
 from .app import run_case
 from .build import PACKAGE, EXECUTABLE, build
 from .model import load_case, write_case
-from .rpc import DEFAULT_POOLS, POCKET, RpcClient, RpcUnavailable, capture
+from .rpc import DEFAULT_POOLS, RpcClient, RpcUnavailable, capture
 
 EXAMPLE = PACKAGE / "examples/toy"
 
@@ -32,7 +32,13 @@ def execute(args):
         raise ValueError("輸出目錄已存在，請另選新目錄，避免覆蓋結果。")
     if args.command == "rpc":
         # No URL command-line option: avoid leaking provider keys into process lists.
-        url = os.environ.get("DELTA_RPC_URL") or getpass.getpass("RPC URL（隱藏輸入；空白使用 Pocket）：").strip() or POCKET
+        url = os.environ.get("DELTA_RPC_URL")
+        if url is None:
+            url = getpass.getpass("RPC URL（隱藏輸入；空白取消）：")
+        url = url.strip()
+        if not url:
+            print("未提供 RPC URL，已取消；未連線、未產生資料。")
+            return
         client = RpcClient(url)
         print(f"RPC：{client.host}；最多 64 請求、間隔 2 秒、無自動重試。", flush=True)
         case = capture(client, blocks=args.blocks, k=args.k, pool_path=args.pools,
@@ -81,7 +87,7 @@ def menu():
     while True:
         print("\n┌──────────── DELTA 研究終端機 ────────────┐")
         print("│ 1  離線範例／代幣圖                    │")
-        print("│ 2  RPC 擷取與測試（有限 finalized 區塊）│")
+        print("│ 2  RPC 擷取代幣圖＋回放（有限區塊）    │")
         print("│ 3  編譯核心                            │")
         print("│ 0  結束                                │")
         print("└────────────────────────────────────────┘")
