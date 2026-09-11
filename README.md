@@ -55,6 +55,17 @@ python -m delta_terminal offline --case "C:\results\new_rpc_run_case" --output "
 
 Use `--pools` for a compatible pool configuration and `--start-block` for a finalized historical starting block, if the provider serves that state. The adapter assumes Uniswap V2's 997/1000 fee multiplier and one pool per token pair; parallel pools are rejected rather than silently merged.
 
+## Small datasets from recorded chain events
+
+See also the [small token-graph dataset builder](token_graph_dataset/README.md): it reconstructs recorded Uniswap V2 Sync events into DELTA cases, groups updates at complete-transaction boundaries, and checks small graphs against independent exhaustive cycle oracles. It consumes an explicit local source folder; it does not fetch new RPC data or bundle market records.
+
+```sh
+python -m token_graph_dataset build --source SOURCE --blocks 100 --output NEW_CASE
+python -m token_graph_dataset verify --case NEW_CASE --output NEW_VERIFICATION.json
+```
+
+Build the DELTA core before verification, as shown in Quick start above.
+
 ## Clone on macOS / Linux
 
 Use an existing Python 3.12+ and C++17 Clang/GCC installation, then create a local environment. No Windows binary or external research-workspace directory is required:
@@ -83,7 +94,7 @@ The terminal preserves the validated DELTA recurrence. The native engine, proces
 ## Tests
 
 ~~~powershell
-python -m unittest delta_terminal.tests.test_terminal -v
+python -m unittest delta_terminal.tests.test_terminal token_graph_dataset.tests.test_dataset -v
 ~~~
 
 Tests cover the teaching fixture, independently enumerated small graphs, batching, RPC-to-offline replay, inactive pools, block-hash changes, invalid input, credential redaction, request limits, and failed-run status. The optional original-binary comparison requires:
@@ -103,6 +114,7 @@ python -m unittest delta_terminal.tests.test_terminal -v
 ├── README.zh-TW.md             # Traditional Chinese entry point
 ├── requirements.txt           # No third-party Python dependencies
 ├── delta_terminal/             # DELTA core, terminal, RPC adapter, tests
+├── token_graph_dataset/        # Recorded Sync events -> small replay cases and oracle checks
 ├── scripts/                    # Cross-platform shell demos
 └── .github/workflows/          # Native build and tests on Ubuntu/macOS
 ~~~
