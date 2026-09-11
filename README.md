@@ -2,20 +2,9 @@
 
 [English](README.md) | [繁體中文](README.zh-TW.md)
 
-Research software for reproducible token-graph experiments and incremental cycle maintenance in decentralized exchanges. This checkout provides a DELTA terminal application and the RICH/TRADER dataset-audit foundation.
+Research software for reproducible token-graph experiments and incremental cycle maintenance in decentralized exchanges. This checkout focuses on the DELTA terminal application, its native engine, data adapters, examples, and correctness tests.
 
-## Available components
-
-| Component | Available functionality | Guide |
-|---|---|---|
-| DELTA terminal | Interactive menu, offline graph replay, bounded read-only Ethereum RPC capture, answer-equivalence tests | [Terminal guide (繁體中文)](delta_terminal/README.md) |
-| DEX data feasibility | Independent Uniswap V2 data capture and gas/price-impact-aware triangular-route simulation | [Feasibility guide](dex_arbitrage_feasibility/README.md) |
-| RICH/TRADER benchmark | UNI1–UNI6 source/data audit, experiment protocol, result schema | [Benchmark guide](rich_trader_benchmark/README.md) |
-| Supporting experiments | Scoped, reproducible research experiments | [Experiment policy](experiments/README.md) |
-
-Benchmark execution, CCSS evaluation, and dependency profiling on other unmerged branches are not automatically included in this checkout. Raw author datasets, external baseline source trees, and compiled binaries are not bundled.
-
-`dex_arbitrage_feasibility` is retained as an independent research module, not a DELTA dependency. The older `dex_data_probe` has been retired from `main`; a historical local branch may still contain it and its local data.
+The [terminal guide (繁體中文)](delta_terminal/README.md) covers the interactive menu, offline graph replay, bounded read-only Ethereum RPC capture, and answer-equivalence tests. Raw author datasets, external baseline source trees, and compiled binaries are not bundled.
 
 ## Quick start: DELTA
 
@@ -104,15 +93,9 @@ python -m unittest delta_terminal.tests.test_terminal -v
 
 `DELTA_REFERENCE_CASE` can select a different small case. This comparison also performs exhaustive enumeration: do not use it on a large graph. Dated local acceptance results are in the terminal guide; these functional tests are not performance benchmarks.
 
-## RICH/TRADER data audit
+## Historical research modules
 
-Obtain the author-provided TRADER data separately and keep it outside Git:
-
-~~~powershell
-python rich_trader_benchmark/scripts/audit_datasets.py --data-dir "C:\data\processed_graph_data_new" --output-dir "C:\results\data_audit"
-~~~
-
-Alternatively set `TRADER_UNI_DATA_DIR`. The audit checks provenance, manifest identity, format, counts, and event order, then writes JSON/CSV/Markdown reports. Passing a data audit does not establish an arbitrage result. Read [data provenance](rich_trader_benchmark/docs/data_provenance.md), [audit details](rich_trader_benchmark/docs/data_audit.md), and the [experiment protocol](rich_trader_benchmark/docs/experiment_protocol.md) before interpreting measurements.
+DELTA does not depend on `rich_trader_benchmark`, `dex_arbitrage_feasibility`, or the former `experiments` directory. Those independent research modules are retained in the [pre-cleanup Git snapshot](https://github.com/joelai0101/dex-arbitrage-research/tree/fe82afbdc05fcfadebf705f95db9b32dd26661a4), not in this DELTA-focused source tree. `dex_data_probe` was retired earlier. Removing these modules from the current tree does not delete their Git history or external research data.
 
 ## Repository layout
 
@@ -122,8 +105,7 @@ Alternatively set `TRADER_UNI_DATA_DIR`. The audit checks provenance, manifest i
 ├── README.zh-TW.md             # Traditional Chinese entry point
 ├── delta_terminal/             # DELTA core, terminal, RPC adapter, tests
 ├── scripts/                    # Cross-platform shell demos
-├── rich_trader_benchmark/      # Dataset audit and benchmark specification
-└── experiments/               # Supporting experiment policy
+└── .github/workflows/          # Native build and tests on Ubuntu/macOS
 ~~~
 
 The surrounding research workspace may contain `6D/doc`, `6D/pdf`, or other research materials; those directories are outside this Git repository.
