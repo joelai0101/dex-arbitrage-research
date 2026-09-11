@@ -95,10 +95,6 @@ python -m unittest delta_terminal.tests.test_terminal -v
 
 `DELTA_REFERENCE_CASE` can select a different small case. This comparison also performs exhaustive enumeration: do not use it on a large graph. Dated local acceptance results are in the terminal guide; these functional tests are not performance benchmarks.
 
-## Historical research modules
-
-DELTA does not depend on `rich_trader_benchmark`, `dex_arbitrage_feasibility`, or the former `experiments` directory. Those independent research modules are retained in the [pre-cleanup Git snapshot](https://github.com/joelai0101/dex-arbitrage-research/tree/fe82afbdc05fcfadebf705f95db9b32dd26661a4), not in this DELTA-focused source tree. `dex_data_probe` was retired earlier. Removing these modules from the current tree does not delete their Git history or external research data.
-
 ## Repository layout
 
 ~~~text

@@ -95,10 +95,6 @@ python -m unittest delta_terminal.tests.test_terminal -v
 
 `DELTA_REFERENCE_CASE` 可指定其他小圖；此比較也會進行完整窮舉，因此不要用於大圖。具日期的本機驗收結果見終端機指南；這些是功能測試，不是效能 benchmark。
 
-## 歷史研究模組
-
-DELTA 不依賴 `rich_trader_benchmark`、`dex_arbitrage_feasibility` 或原 `experiments` 目錄。這些獨立研究模組保留在[整理前的 Git 快照](https://github.com/joelai0101/dex-arbitrage-research/tree/fe82afbdc05fcfadebf705f95db9b32dd26661a4)，不放在目前聚焦 DELTA 的程式樹；`dex_data_probe` 已於更早版本退役。移出目前程式樹不會刪除其 Git 歷史或外部研究資料。
-
 ## 目錄結構
 
 ~~~text
