@@ -137,9 +137,10 @@ GroupingEvent PaperEdgeGrouping::update(const EdgeUpdate& update) {
   const auto old = live_.edge_weight(edge.source, edge.destination);
   if ((update.erase && !old) || (!update.erase && old && *old == update.weight)) return {};
   const bool is_new = !old && !update.erase;
+  const bool same_color = model_.colors().at(edge.source) == model_.colors().at(edge.destination);
   const bool on_best = anchor_.exists && contains(anchor_.cycle, edge);
   double adverse = 0;
-  if (old && !update.erase)
+  if (!same_color && old && !update.erase)
     adverse = on_best ? std::max(0.0, update.weight - *old) : std::max(0.0, *old - update.weight);
   if (update.erase && on_best) adverse = std::numeric_limits<double>::infinity();
   pending_.push_back(update);
@@ -147,8 +148,11 @@ GroupingEvent PaperEdgeGrouping::update(const EdgeUpdate& update) {
   else live_.set_edge(edge.source, edge.destination, update.weight);
   // New edges and deletion of the selected cycle force maintenance. The latter
   // avoids inf <= inf in the one-candidate case, an explicit completion rule.
-  const bool immediate = is_new || !anchor_.exists || (update.erase && on_best)
-                      || accumulated_ + adverse > gap_;
+  // A same-color edge belongs to no colorful path/cycle in this fixed
+  // instance. Retain its graph update for the next batch, without consuming
+  // the cycle gap or forcing maintenance (even if it is a new edge).
+  const bool immediate = !same_color && (is_new || !anchor_.exists || (update.erase && on_best)
+                      || accumulated_ + adverse > gap_);
   const double prior_gap = gap_;
   accumulated_ += adverse;
   if (immediate) {

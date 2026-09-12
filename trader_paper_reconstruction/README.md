@@ -28,6 +28,18 @@ The current official GitHub main was checked as `8e047fdf35e8c44f189a59f506431b4
 
 ## What is implemented
 
+### Color-aware EG and propagation overhead
+
+Same-color endpoints cannot form an edge of a colorful path in that coloring. Their updates now change the live graph and remain in the pending batch, but neither consume the gap nor force maintenance (including insertions and no-candidate cases). A later relevant trigger or EOF still applies every pending update. This does not remove input edges or shrink the candidate universe. A regression fails on the previous release and passes after this change; Edge Grouping now has 4918 checks.
+
+The detailed diagnostic build writes buffered per-arrival/per-coloring and EOF events to `<trace.tsv>.eg.jsonl` after online timing. It separates natural batch sizes, coalesced/effective updates, trigger reasons, and DP setup/seeding/propagation work. Profiling counters are not formal timing results. The first 256 UNI1 updates with ell=1 previously triggered 58 natural batches (mean 4.09); color-aware EG triggers 46 (mean 4.98), removes all 11 same-color trigger events, and preserves 257/257 answers. The detailed profile still takes 532.15 ms/update with 11508648 changed states and 21793711 predecessor-state lookups. Fewer triggers alone have not demonstrated a speedup.
+
+The next local optimization removes redundant ever-queued and processed trees: each state key belongs to one color-cardinality layer, the pending set deduplicates it, and propagation only adds a color. Consumed proposal values move into replacements; path extension reserves its final size once and full recurrence skips path allocation for strictly worse weights (ties still use the same path comparison). A converging-proposal regression verifies one shared successor is processed once. The seven layer-wise suites, 288 generated checkpoints, four C++ executables and six stream oracles pass in profile and release builds.
+
+The matched detailed-profile UNI1/256-update/ell=1 pilot completed at 401.26 ms/update and 2147.63 MiB peak, with 257/257 correct answers. Compared with the color-aware profile's 532.15 ms/update, this is a 24.60% reduction in one run, not a replicated performance estimate. All 257 event decisions and DP workload counters match; graph, color and update input hashes match. Initialization (121628.56 ms) is excluded, and EOF flush remains included. DP propagation totals decreased from 127421.23 to 98517.17 ms; the state and candidate universes are unchanged.
+
+The non-instrumented confirmation completed at 381.41 ms/update, 2162.86 MiB peak, and 2.62 updates/s, with 257/257 correct answers. Initialization (120179.28 ms) is excluded. All 47 maintenance batches, 11508648 processed states, 13686062 resident states and 255802 candidates match the profile run. This is a single-color short-stream confirmation, not a formal ell=80 result. The performance-alignment gate remains unmet.
+
 | Paper component | Implementation | Explicit completion / boundary |
 |---|---|---|
 | Algorithm 2 | Coalescing, greedy edge-disjoint DAG decomposition | Update-edge-only and vertex-induced interpretations remain separately selectable |
@@ -43,7 +55,7 @@ The candidate catalogue explicitly enumerates the complete fixed-color cycle uni
 ## Edge Grouping details
 
 - C1 and C2 are different canonical directed cycles; rotations do not create fake runner-up cycles. Tied distinct cycles have zero gap.
-- A gap of positive infinity means there is exactly one candidate. No candidate forces maintenance on effective changes; a new edge always forces maintenance.
+- A gap of positive infinity means there is exactly one candidate. For different-color endpoints, no candidate forces maintenance on effective changes and a new edge forces maintenance. Same-color updates remain pending without triggering or consuming the gap.
 - Contributions use consecutive live old/new edge weights. Decreases outside the anchored C1 and increases on C1 increase the accumulated bound. Reverse changes do not subtract earlier contributions, so cancellation can conservatively trigger extra work.
 - On maintenance, Algorithm 3 receives the whole pending batch; the candidate index is then synchronized to that final graph. The cumulative bound and gap are reset.
 - During deferral the live graph changes but maintained DP/candidate keys remain at the previous maintenance boundary. Returned C1 weight is freshly evaluated, not read from the stale key.

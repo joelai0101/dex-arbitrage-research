@@ -27,6 +27,18 @@ struct LayerwiseBatchApplication {
   bool cross_dag_vertex_overlap = false;
   bool effective_update_coverage = false;
   bool every_state_processed_at_most_once = false;
+#ifdef TRADER_PROFILE
+  double setup_ms = 0;
+  double seed_ms = 0;
+  double propagation_ms = 0;
+  std::size_t seed_prefixes_examined = 0;
+  std::size_t proposal_attempts = 0;
+  std::size_t repair_requests = 0;
+  std::size_t repair_states = 0;
+  std::size_t proposal_states = 0;
+  std::size_t incoming_edges_scanned = 0;
+  std::size_t incoming_state_lookups = 0;
+#endif
 };
 
 // Paper-derived correctness completion of Algorithm 3.

@@ -189,6 +189,23 @@ void test_selected_witness_repair_and_stale_proposal() {
   }
 }
 
+void test_converging_improvements_share_one_queue_key() {
+  ++suites;
+  DirectedWeightedGraph graph;
+  add_edges(graph, {{0, 1, 10}, {0, 3, 10}, {1, 2, 0}, {3, 2, 0}});
+  const ColorMap colors{{0, 0}, {1, 1}, {2, 2}, {3, 1}};
+  PaperLayerwiseBatchMaintainer maintainer(graph, colors, 3);
+  const auto application = maintainer.apply_batch(
+      {update(0, 1, 5, 0), update(0, 3, 4, 1)}, DependencyGraphMode::UpdateEdgesOnly);
+  require_application_contract(application, "converging improvements");
+  require_oracle_match(maintainer, "converging improvements");
+  require(application.queued_state_keys == 3 && application.processed_state_keys == 3,
+          "two proposals for one successor must share one queue entry");
+  const auto &value = maintainer.states().at({0, 2, 7});
+  require(value.weight == 4 && value.path == std::vector<VertexId>({0, 3, 2}),
+          "deduplicated successor must retain the best incoming proposal");
+}
+
 std::vector<SchedulePolicy> all_policies() {
   std::vector<SchedulePolicy> result;
   for (const auto vertex_ties :
@@ -316,6 +333,7 @@ int main() {
   test_increase_deletion_and_alternative_paths();
   test_two_updated_edges_create_one_new_path();
   test_selected_witness_repair_and_stale_proposal();
+  test_converging_improvements_share_one_queue_key();
   test_layerwise_result_is_independent_of_legal_ties();
   test_fixed_seed_generated_batches();
   std::cout << "BL-4 passed: " << suites << " suites, including "

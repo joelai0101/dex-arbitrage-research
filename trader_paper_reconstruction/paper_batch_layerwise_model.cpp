@@ -6,6 +6,9 @@
 #include <optional>
 #include <stdexcept>
 #include <tuple>
+#ifdef TRADER_PROFILE
+#include <chrono>
+#endif
 
 namespace trader::paper_batch {
 namespace {
@@ -53,7 +56,11 @@ std::optional<StateValue> recompute_state(const DirectedWeightedGraph &graph,
                                           const ColorMap &colors,
                                           std::uint32_t hop_bound,
                                           const StateTable &states,
-                                          const StateKey &key) {
+                                          const StateKey &key
+#ifdef TRADER_PROFILE
+                                          , LayerwiseBatchApplication &profile
+#endif
+                                          ) {
   const ColorMask destination_bit =
       color_bit(colors, key.destination, hop_bound);
   if ((key.colors & destination_bit) == 0 || popcount(key.colors) < 2 ||
@@ -65,18 +72,27 @@ std::optional<StateValue> recompute_state(const DirectedWeightedGraph &graph,
   std::optional<StateValue> best;
   for (const auto &[predecessor, edge_weight] :
        graph.incoming(key.destination)) {
+#ifdef TRADER_PROFILE
+    ++profile.incoming_edges_scanned;
+#endif
     const ColorMask predecessor_bit = color_bit(colors, predecessor, hop_bound);
     if ((predecessor_mask & predecessor_bit) == 0) {
       continue;
     }
+#ifdef TRADER_PROFILE
+    ++profile.incoming_state_lookups;
+#endif
     const auto found = states.find({key.source, predecessor, predecessor_mask});
     if (found == states.end() || found->second.path.empty() ||
         found->second.path.front() != key.source ||
         found->second.path.back() != predecessor) {
       continue;
     }
-    StateValue candidate = found->second;
-    candidate.weight += edge_weight;
+    const double weight = found->second.weight + edge_weight;
+    if (best && weight > best->weight) continue;
+    StateValue candidate{weight, {}};
+    candidate.path.reserve(found->second.path.size() + 1);
+    candidate.path.insert(candidate.path.end(), found->second.path.begin(), found->second.path.end());
     candidate.path.push_back(key.destination);
     if (!best.has_value() || better_candidate(candidate, *best)) {
       best = std::move(candidate);
@@ -104,6 +120,10 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
     const std::vector<EdgeUpdate> &updates, DependencyGraphMode mode,
     const SchedulePolicy &policy) {
   LayerwiseBatchApplication result;
+#ifdef TRADER_PROFILE
+  using Clock = std::chrono::steady_clock;
+  const auto profile_started = Clock::now();
+#endif
   result.schedule = build_schedule(updates, graph_.edges(), mode, policy);
   result.cross_dag_vertex_overlap =
       has_cross_dag_vertex_overlap(result.schedule.dags);
@@ -188,8 +208,10 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
                              "effective update once per pass");
   }
 
+#ifdef TRADER_PROFILE
+  const auto profile_setup_end = Clock::now();
+#endif
   std::vector<std::set<StateKey>> pending(hop_bound_ + 1);
-  std::set<StateKey> ever_queued;
   std::set<StateKey> must_recompute;
   std::map<StateKey, StateValue> improvements;
   auto enqueue = [&](const StateKey &key) {
@@ -198,7 +220,7 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
       return false;
     }
     const bool inserted = pending[layer].insert(key).second;
-    if (inserted && ever_queued.insert(key).second) {
+    if (inserted) {
       ++result.queued_state_keys;
     }
     return inserted;
@@ -207,10 +229,15 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
   auto offer_improvement = [&](const StateKey &key, const StateValue &prefix,
                                double edge_weight) {
     if (popcount(key.colors) > hop_bound_) return false;
+#ifdef TRADER_PROFILE
+    ++result.proposal_attempts;
+#endif
     const double weight = prefix.weight + edge_weight;
     const auto old = states_.find(key);
     if (old != states_.end() && weight > old->second.weight) return false;
-    StateValue candidate{weight, prefix.path};
+    StateValue candidate{weight, {}};
+    candidate.path.reserve(prefix.path.size() + 1);
+    candidate.path.insert(candidate.path.end(), prefix.path.begin(), prefix.path.end());
     candidate.path.push_back(key.destination);
     if (old != states_.end() && !better_candidate(candidate, old->second)) return false;
     auto proposal = improvements.find(key);
@@ -221,6 +248,9 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
 
   auto request_repair = [&](const StateKey &key, VertexId predecessor) {
     if (popcount(key.colors) > hop_bound_) return false;
+#ifdef TRADER_PROFILE
+    ++result.repair_requests;
+#endif
     const auto uses_predecessor = [&](const StateValue &value) {
       return value.path.size() >= 2 &&
              value.path[value.path.size() - 2] == predecessor;
@@ -247,6 +277,9 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
     std::size_t inserted = 0;
     auto it = states_.lower_bound(StateKey{0, edge.source, 0});
     for (; it != states_.end() && it->first.destination == edge.source; ++it) {
+#ifdef TRADER_PROFILE
+      ++result.seed_prefixes_examined;
+#endif
       const auto &key = it->first;
       if ((key.colors & bit) != 0) continue;
       const StateKey successor{key.source, edge.destination, key.colors | bit};
@@ -262,13 +295,15 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
   for (const auto &edge : result.backward_applied_updates)
     if (adverse_edges.count(edge)) result.backward_invalidation_seeds += seed_edge(edge, true);
 
-  std::set<StateKey> processed;
+#ifdef TRADER_PROFILE
+  const auto profile_seed_end = Clock::now();
+#endif
+  // A key belongs to exactly one color-cardinality layer, whose set already
+  // deduplicates it. Propagation adds one color, so it cannot enqueue work in
+  // this or an earlier layer. Separate ever-queued/processed trees duplicate
+  // the same keys without strengthening this once-per-pass invariant.
   for (std::size_t layer = 2; layer <= hop_bound_; ++layer) {
     for (const StateKey &key : pending[layer]) {
-      if (!processed.insert(key).second) {
-        throw std::runtime_error(
-            "a DP state was processed more than once in one layer-wise pass");
-      }
       ++result.processed_state_keys;
       const auto old = states_.find(key);
       // Only invalidated states need the full incoming-edge recurrence. For
@@ -276,10 +311,23 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
       // optimum; incoming proposals carry every changed lower-layer value.
       // A repair wins over all possibly stale proposals in a mixed batch.
       std::optional<StateValue> replacement;
-      if (must_recompute.count(key))
-        replacement = recompute_state(graph_, colors_, hop_bound_, states_, key);
-      else {
-        replacement = improvements.at(key);
+      if (must_recompute.count(key)) {
+#ifdef TRADER_PROFILE
+        ++result.repair_states;
+#endif
+        replacement = recompute_state(graph_, colors_, hop_bound_, states_, key
+#ifdef TRADER_PROFILE
+                                      , result
+#endif
+                                      );
+      } else {
+#ifdef TRADER_PROFILE
+        ++result.proposal_states;
+#endif
+        auto proposal = improvements.find(key);
+        if (proposal == improvements.end()) throw std::runtime_error("missing queued improvement");
+        replacement = std::move(proposal->second);
+        improvements.erase(proposal);
         if (old != states_.end() && better_candidate(old->second, *replacement))
           replacement = old->second;
       }
@@ -321,12 +369,17 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
   }
 
   result.every_state_processed_at_most_once =
-      processed.size() == result.processed_state_keys &&
       result.processed_state_keys == result.queued_state_keys;
   if (!result.every_state_processed_at_most_once) {
     throw std::runtime_error(
         "layer-wise state queue left an unprocessed or duplicate state");
   }
+#ifdef TRADER_PROFILE
+  const auto profile_end = Clock::now();
+  result.setup_ms = std::chrono::duration<double,std::milli>(profile_setup_end-profile_started).count();
+  result.seed_ms = std::chrono::duration<double,std::milli>(profile_seed_end-profile_setup_end).count();
+  result.propagation_ms = std::chrono::duration<double,std::milli>(profile_end-profile_seed_end).count();
+#endif
   return result;
 }
 

@@ -55,6 +55,32 @@ void single_candidate() {
   event = engine.update({0,1,0,true,"2",2});
   require(event.maintained, "infinite gap cannot defer selected deletion"); verify(engine, true);
 }
+void same_color_updates_do_not_trigger() {
+  for (const auto mode : {DependencyGraphMode::UpdateEdgesOnly, DependencyGraphMode::VertexInduced}) {
+    DirectedWeightedGraph graph; ColorMap colors{{0,0},{1,1},{2,2},{3,1},{4,2}};
+    graph.set_edge(0,1,-1); graph.set_edge(1,2,-1); graph.set_edge(2,0,-1);
+    graph.set_edge(0,3,0); graph.set_edge(3,4,0); graph.set_edge(4,0,0);
+    PaperEdgeGrouping engine(graph,colors,3,mode);
+    auto event = engine.update({1,2,0,false,"pending colorful",1});
+    require(event.deferred, "colorful change below gap must defer"); verify(engine,false);
+    event = engine.update({1,3,-100,false,"same-color insertion",2});
+    require(event.deferred && !event.maintained && event.adverse_change == 0,
+            "same-color insertion must not trigger or consume cycle gap"); verify(engine,false);
+    event = engine.update({1,3,-200,false,"same-color decrease",3});
+    require(event.deferred && !event.maintained && event.adverse_change == 0,
+            "same-color decrease must not consume cycle gap"); verify(engine,false);
+    event = engine.update({1,3,0,true,"same-color deletion",4});
+    require(event.deferred && !event.maintained, "same-color deletion must defer"); verify(engine,false);
+    event = engine.update({1,2,3,false,"colorful trigger",5});
+    require(event.maintained && event.batch_size == 5,
+            "later maintenance must retain all deferred graph updates"); verify(engine,true);
+
+    PaperEdgeGrouping empty(DirectedWeightedGraph{},colors,3,mode);
+    event = empty.update({1,3,-100,false,"no-candidate same-color",1});
+    require(event.deferred && !event.maintained, "no candidate does not make same-color edges relevant"); verify(empty,false);
+    empty.flush(); verify(empty,true);
+  }
+}
 void candidate_reweight_incidence() {
   DirectedWeightedGraph graph; ColorMap colors{{0,0},{1,1},{2,2},{3,1},{4,2}};
   graph.set_edge(0,1,-1); graph.set_edge(1,2,-1); graph.set_edge(2,0,-1);
@@ -105,6 +131,6 @@ void randomized() {
 int main() {
   boundaries(DependencyGraphMode::UpdateEdgesOnly);
   boundaries(DependencyGraphMode::VertexInduced);
-  single_candidate(); candidate_reweight_incidence(); randomized();
+  single_candidate(); same_color_updates_do_not_trigger(); candidate_reweight_incidence(); randomized();
   std::cout << "Algorithm 4 checks passed: " << checks << " answer/state checkpoints\n";
 }

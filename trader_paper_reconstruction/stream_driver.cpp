@@ -6,6 +6,9 @@
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#ifdef TRADER_PROFILE
+#include <cmath>
+#endif
 #ifdef _WIN32
 #include <windows.h>
 #include <psapi.h>
@@ -64,8 +67,41 @@ int main(int argc, char** argv) { try {
   std::size_t rows = 0, batches = 0, deferred = 0, states_processed = 0;
 #ifdef TRADER_PROFILE
   double snapshot_ms = 0, dp_ms = 0, candidate_ms = 0;
+  std::vector<double> cumulative(ell, 0);
+  std::ostringstream events;
+  events << std::setprecision(17);
   auto profile = [&](const GroupingEvent& event) {
     snapshot_ms += event.snapshot_ms; dp_ms += event.dp_ms; candidate_ms += event.candidate_ms;
+  };
+  auto record_event = [&](std::size_t row, std::size_t trial, const char* reason,
+                          const GroupingEvent& event, double elapsed) {
+    cumulative[trial] += event.adverse_change;
+    auto number = [&](double value) {
+      if (std::isfinite(value)) events << value;
+      else events << "\"" << (value < 0 ? "-inf" : "inf") << "\"";
+    };
+    events << "{\"row\":" << row << ",\"coloring\":" << trial
+           << ",\"reason\":\"" << reason << "\",\"maintained\":" << (event.maintained ? "true" : "false")
+           << ",\"batch_size\":" << event.batch_size
+           << ",\"coalesced_size\":" << event.layerwise.schedule.coalesced_updates.size()
+           << ",\"effective_updates\":" << event.layerwise.effective_updates.size()
+           << ",\"states_processed\":" << event.layerwise.processed_state_keys
+           << ",\"gap_before\":"; number(event.gap_before);
+    events << ",\"cumulative_adverse\":"; number(cumulative[trial]);
+    events << ",\"update_ms\":" << elapsed << ",\"snapshot_ms\":" << event.snapshot_ms
+           << ",\"dp_ms\":" << event.dp_ms << ",\"candidate_ms\":" << event.candidate_ms
+           << ",\"dp_setup_ms\":" << event.layerwise.setup_ms
+           << ",\"dp_seed_ms\":" << event.layerwise.seed_ms
+           << ",\"dp_propagation_ms\":" << event.layerwise.propagation_ms
+           << ",\"seed_prefixes_examined\":" << event.layerwise.seed_prefixes_examined
+           << ",\"proposal_attempts\":" << event.layerwise.proposal_attempts
+           << ",\"repair_requests\":" << event.layerwise.repair_requests
+           << ",\"repair_states\":" << event.layerwise.repair_states
+           << ",\"proposal_states\":" << event.layerwise.proposal_states
+           << ",\"changed_states\":" << event.layerwise.changed_state_keys
+           << ",\"incoming_edges_scanned\":" << event.layerwise.incoming_edges_scanned
+           << ",\"incoming_state_lookups\":" << event.layerwise.incoming_state_lookups << "}\n";
+    if (event.maintained) cumulative[trial] = 0;
   };
 #endif
   double core = 0; auto begin = Clock::now();
@@ -78,25 +114,52 @@ int main(int argc, char** argv) { try {
     ++rows; auto start = Clock::now();
     if (token != "N") {
       const EdgeUpdate update{u,v,std::stod(token),false,std::to_string(rows),rows};
-      for (auto& engine : engines) {
+      for (std::size_t trial = 0; trial < engines.size(); ++trial) {
+        auto& engine = engines[trial];
+#ifdef TRADER_PROFILE
+        const bool is_new = !engine->live_graph().has_edge(u,v);
+        const bool has_candidate = engine->candidates() != 0;
+        const auto event_start = Clock::now();
+#endif
         auto event = engine->update(update);
 #ifdef TRADER_PROFILE
+        const double event_ms = ms(event_start,Clock::now());
         profile(event);
+        const char* reason = event.maintained ? (is_new ? "new_edge" : (!has_candidate ? "no_candidate" : "gap_exceeded"))
+                           : (event.deferred ? "deferred" : "no_change");
+        record_event(rows,trial,reason,event,event_ms);
 #endif
         batches += event.maintained; deferred += event.deferred;
         states_processed += event.layerwise.processed_state_keys;
       }
     }
+#ifdef TRADER_PROFILE
+    else for (std::size_t trial = 0; trial < engines.size(); ++trial)
+      record_event(rows,trial,"input_N",GroupingEvent{},0);
+#endif
     const auto best = answer(); core += ms(start,Clock::now()); emit(rows,best);
   }
   // Explicit completion rule: flush deferred work at EOF; cost stays online.
   auto start = Clock::now();
-  for (auto& engine : engines) { auto event = engine->flush(); batches += event.maintained; states_processed += event.layerwise.processed_state_keys;
+  for (std::size_t trial = 0; trial < engines.size(); ++trial) {
 #ifdef TRADER_PROFILE
+    const auto event_start = Clock::now();
+#endif
+    auto event = engines[trial]->flush(); batches += event.maintained; states_processed += event.layerwise.processed_state_keys;
+#ifdef TRADER_PROFILE
+    const double event_ms = ms(event_start,Clock::now());
     profile(event);
+    record_event(rows,trial,"eof_flush",event,event_ms);
 #endif
   }
   core += ms(start,Clock::now()); trace.flush(); updates.close(); auto end = Clock::now();
+#ifdef TRADER_PROFILE
+  // Diagnostic records are buffered in memory and written after online timing.
+  // Profiling results must still remain separate from formal release timings.
+  std::ofstream event_output(std::string(argv[5])+".eg.jsonl");
+  if (!event_output) throw std::runtime_error("EG diagnostic output");
+  event_output << events.str();
+#endif
   std::size_t candidates = 0, states = 0;
   for (const auto& engine : engines) { candidates += engine->candidates(); states += engine->model().states().size(); }
   double peak_mib = 0;
