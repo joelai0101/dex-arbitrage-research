@@ -211,24 +211,18 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
 #ifdef TRADER_PROFILE
   const auto profile_setup_end = Clock::now();
 #endif
-  std::vector<std::set<StateKey>> pending(hop_bound_ + 1);
-  std::set<StateKey> must_recompute;
-  std::map<StateKey, StateValue> improvements;
-  auto enqueue = [&](const StateKey &key) {
-    const std::size_t layer = popcount(key.colors);
-    if (layer < 2 || layer > hop_bound_) {
-      return false;
-    }
-    const bool inserted = pending[layer].insert(key).second;
-    if (inserted) {
-      ++result.queued_state_keys;
-    }
-    return inserted;
+  struct PendingState {
+    bool must_recompute = false;
+    std::optional<StateValue> improvement;
   };
+  // One ordered entry holds queue membership, invalidation and the best
+  // proposal. Separate trees repeat the same keys and lookups.
+  std::vector<std::map<StateKey, PendingState>> pending(hop_bound_ + 1);
 
   auto offer_improvement = [&](const StateKey &key, const StateValue &prefix,
                                double edge_weight) {
-    if (popcount(key.colors) > hop_bound_) return false;
+    const std::size_t layer = popcount(key.colors);
+    if (layer < 2 || layer > hop_bound_) return false;
 #ifdef TRADER_PROFILE
     ++result.proposal_attempts;
 #endif
@@ -240,14 +234,16 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
     candidate.path.insert(candidate.path.end(), prefix.path.begin(), prefix.path.end());
     candidate.path.push_back(key.destination);
     if (old != states_.end() && !better_candidate(candidate, old->second)) return false;
-    auto proposal = improvements.find(key);
-    if (proposal == improvements.end()) improvements.emplace(key, std::move(candidate));
-    else if (better_candidate(candidate, proposal->second)) proposal->second = std::move(candidate);
-    return enqueue(key);
+    auto [entry, inserted] = pending[layer].try_emplace(key);
+    if (inserted) ++result.queued_state_keys;
+    auto &proposal = entry->second.improvement;
+    if (!proposal || better_candidate(candidate, *proposal)) proposal = std::move(candidate);
+    return inserted;
   };
 
   auto request_repair = [&](const StateKey &key, VertexId predecessor) {
-    if (popcount(key.colors) > hop_bound_) return false;
+    const std::size_t layer = popcount(key.colors);
+    if (layer < 2 || layer > hop_bound_) return false;
 #ifdef TRADER_PROFILE
     ++result.repair_requests;
 #endif
@@ -256,15 +252,21 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
              value.path[value.path.size() - 2] == predecessor;
     };
     const auto current = states_.find(key);
-    const auto proposal = improvements.find(key);
+    auto entry = pending[layer].find(key);
     // Worsening an unused recurrence contribution cannot worsen the optimum.
     // A mixed batch may nevertheless have queued a now-stale improvement,
     // including for a state that did not exist before this batch.
     if ((current == states_.end() || !uses_predecessor(current->second)) &&
-        (proposal == improvements.end() || !uses_predecessor(proposal->second)))
+        (entry == pending[layer].end() || !entry->second.improvement ||
+         !uses_predecessor(*entry->second.improvement)))
       return false;
-    must_recompute.insert(key);
-    return enqueue(key);
+    if (entry != pending[layer].end()) {
+      entry->second.must_recompute = true;
+      return false;
+    }
+    pending[layer].emplace(key, PendingState{true, std::nullopt});
+    ++result.queued_state_keys;
+    return true;
   };
 
   // StateKey is destination-major: locate only prefixes ending at the
@@ -298,12 +300,12 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
 #ifdef TRADER_PROFILE
   const auto profile_seed_end = Clock::now();
 #endif
-  // A key belongs to exactly one color-cardinality layer, whose set already
+  // A key belongs to exactly one color-cardinality layer, whose map already
   // deduplicates it. Propagation adds one color, so it cannot enqueue work in
   // this or an earlier layer. Separate ever-queued/processed trees duplicate
   // the same keys without strengthening this once-per-pass invariant.
   for (std::size_t layer = 2; layer <= hop_bound_; ++layer) {
-    for (const StateKey &key : pending[layer]) {
+    for (auto &[key, work] : pending[layer]) {
       ++result.processed_state_keys;
       const auto old = states_.find(key);
       // Only invalidated states need the full incoming-edge recurrence. For
@@ -311,7 +313,7 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
       // optimum; incoming proposals carry every changed lower-layer value.
       // A repair wins over all possibly stale proposals in a mixed batch.
       std::optional<StateValue> replacement;
-      if (must_recompute.count(key)) {
+      if (work.must_recompute) {
 #ifdef TRADER_PROFILE
         ++result.repair_states;
 #endif
@@ -324,10 +326,8 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
 #ifdef TRADER_PROFILE
         ++result.proposal_states;
 #endif
-        auto proposal = improvements.find(key);
-        if (proposal == improvements.end()) throw std::runtime_error("missing queued improvement");
-        replacement = std::move(proposal->second);
-        improvements.erase(proposal);
+        if (!work.improvement) throw std::runtime_error("missing queued improvement");
+        replacement = std::move(*work.improvement);
         if (old != states_.end() && better_candidate(old->second, *replacement))
           replacement = old->second;
       }
@@ -366,6 +366,9 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
         }
       }
     }
+    // All descendants are in later layers; no future operation uses this
+    // layer's proposals or repair flags. Release transient storage now.
+    pending[layer].clear();
   }
 
   result.every_state_processed_at_most_once =

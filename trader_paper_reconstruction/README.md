@@ -40,6 +40,14 @@ The matched detailed-profile UNI1/256-update/ell=1 pilot completed at 401.26 ms/
 
 The non-instrumented confirmation completed at 381.41 ms/update, 2162.86 MiB peak, and 2.62 updates/s, with 257/257 correct answers. Initialization (120179.28 ms) is excluded. All 47 maintenance batches, 11508648 processed states, 13686062 resident states and 255802 candidates match the profile run. This is a single-color short-stream confirmation, not a formal ell=80 result. The performance-alignment gate remains unmet.
 
+### Fused ordered worklist
+
+Queue membership, repair flags and improving proposals now share one ordered map entry per state in each color layer. The ordering and repair-over-proposal rule are unchanged. Once a layer is complete, its temporary entries are released; propagation only adds a color, so later work cannot need these entries. The resident DP map and candidate catalogue are unchanged. The converging-successor regression also covers simultaneous repair/improvement and a later deletion, with full-state/answer checks. Four C++ suites and six multi-color streams pass in profile and release builds.
+
+On the identical UNI1/256-update/ell=1 detailed-profile workload, time changed from 401.26 to 359.28 ms/update (10.46% observed reduction in one run), peak 2147.63 to 2128.86 MiB, with 257/257 correct answers. All 257 event decisions and DP workload counts match; input hashes and answer traces match exactly. Initialization 138845.38 ms is excluded and EOF flush included. Layer cleanup now occurs inside the propagation phase rather than after the phase timer, so phase-only ratios are not directly comparable; full online and outer DP timing contracts are unchanged. This local optimization does not resolve the all-pairs state count or the paper-level performance gap.
+
+Non-instrumented confirmation: 381.41 -> 356.27 ms/update (6.59% observed reduction), peak 2162.86 -> 2122.79 MiB, and 2.81 updates/s after the change. All 257 answers and workload counts match the preceding release and the new profile, with identical input hashes and answer traces. Initialization 136644.18 ms is excluded; online time is 91204.99 ms including EOF. These remain individual ell=1 prefix pilots, not replicated full-stream averages or evidence that ell=80 fits in memory.
+
 | Paper component | Implementation | Explicit completion / boundary |
 |---|---|---|
 | Algorithm 2 | Coalescing, greedy edge-disjoint DAG decomposition | Update-edge-only and vertex-induced interpretations remain separately selectable |

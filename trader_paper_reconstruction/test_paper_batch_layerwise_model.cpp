@@ -204,6 +204,18 @@ void test_converging_improvements_share_one_queue_key() {
   const auto &value = maintainer.states().at({0, 2, 7});
   require(value.weight == 4 && value.path == std::vector<VertexId>({0, 3, 2}),
           "deduplicated successor must retain the best incoming proposal");
+  const auto mixed = maintainer.apply_batch(
+      {update(0, 1, 3, 2), update(0, 3, 12, 3)}, DependencyGraphMode::UpdateEdgesOnly);
+  require_application_contract(mixed, "shared successor repair and proposal");
+  require_oracle_match(maintainer, "shared successor repair and proposal");
+  require(maintainer.states().at({0, 2, 7}).weight == 3,
+          "one queue entry must retain both repair and improving proposal");
+  const auto deleted = maintainer.apply_batch(
+      {update(0, 1, 0, 4, true)}, DependencyGraphMode::UpdateEdgesOnly);
+  require_application_contract(deleted, "shared successor after deletion");
+  require_oracle_match(maintainer, "shared successor after deletion");
+  require(maintainer.states().at({0, 2, 7}).weight == 12,
+          "a later batch must repair the successor using its remaining path");
 }
 
 std::vector<SchedulePolicy> all_policies() {
