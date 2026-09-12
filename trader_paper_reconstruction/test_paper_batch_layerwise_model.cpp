@@ -160,6 +160,35 @@ void test_two_updated_edges_create_one_new_path() {
           "two inserted edges must form the new best cycle");
 }
 
+void test_selected_witness_repair_and_stale_proposal() {
+  ++suites;
+  for (const auto mode : {DependencyGraphMode::UpdateEdgesOnly,
+                          DependencyGraphMode::VertexInduced}) {
+    DirectedWeightedGraph graph;
+    add_edges(graph, {{0, 1, 0}, {1, 2, 5}, {0, 3, 0}, {3, 2, 0}});
+    const ColorMap colors{{0, 0}, {1, 1}, {2, 2}, {3, 1}, {4, 3}};
+    PaperLayerwiseBatchMaintainer maintainer(graph, colors, 4);
+    auto application = maintainer.apply_batch({update(1, 2, 6, 0)}, mode);
+    require_application_contract(application, "unused predecessor increase");
+    require_oracle_match(maintainer, "unused predecessor increase");
+    require(application.processed_state_keys == 1,
+            "an unused incoming edge must not force an unchanged optimum to recompute");
+
+    // The inserted edge initially receives an improving proposal using a
+    // pre-batch prefix. That prefix is worsened elsewhere in this same batch.
+    DirectedWeightedGraph mixed;
+    add_edges(mixed, {{0, 1, 0}, {1, 2, 0}, {0, 3, 10}, {3, 2, 0}});
+    PaperLayerwiseBatchMaintainer mixed_maintainer(mixed, colors, 4);
+    application = mixed_maintainer.apply_batch(
+        {update(1, 2, 20, 0), update(2, 4, 0, 1)}, mode);
+    require_application_contract(application, "stale mixed-batch proposal");
+    require_oracle_match(mixed_maintainer, "stale mixed-batch proposal");
+    const auto &value = mixed_maintainer.states().at({0, 4, 15});
+    require(value.weight == 10 && value.path == std::vector<VertexId>({0, 3, 2, 4}),
+            "repair must invalidate stale proposals, including previously absent states");
+  }
+}
+
 std::vector<SchedulePolicy> all_policies() {
   std::vector<SchedulePolicy> result;
   for (const auto vertex_ties :
@@ -286,6 +315,7 @@ int main() {
   test_coalesced_dag_queue_contract();
   test_increase_deletion_and_alternative_paths();
   test_two_updated_edges_create_one_new_path();
+  test_selected_witness_repair_and_stale_proposal();
   test_layerwise_result_is_independent_of_legal_ties();
   test_fixed_seed_generated_batches();
   std::cout << "BL-4 passed: " << suites << " suites, including "

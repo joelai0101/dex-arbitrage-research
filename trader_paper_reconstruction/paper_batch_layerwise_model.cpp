@@ -219,6 +219,24 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
     return enqueue(key);
   };
 
+  auto request_repair = [&](const StateKey &key, VertexId predecessor) {
+    if (popcount(key.colors) > hop_bound_) return false;
+    const auto uses_predecessor = [&](const StateValue &value) {
+      return value.path.size() >= 2 &&
+             value.path[value.path.size() - 2] == predecessor;
+    };
+    const auto current = states_.find(key);
+    const auto proposal = improvements.find(key);
+    // Worsening an unused recurrence contribution cannot worsen the optimum.
+    // A mixed batch may nevertheless have queued a now-stale improvement,
+    // including for a state that did not exist before this batch.
+    if ((current == states_.end() || !uses_predecessor(current->second)) &&
+        (proposal == improvements.end() || !uses_predecessor(proposal->second)))
+      return false;
+    must_recompute.insert(key);
+    return enqueue(key);
+  };
+
   // StateKey is destination-major: locate only prefixes ending at the
   // updated edge's source. No whole-table or stored-path scan is required.
   // Deletions must also seed the old recurrence contribution. Recompute the
@@ -233,8 +251,7 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
       if ((key.colors & bit) != 0) continue;
       const StateKey successor{key.source, edge.destination, key.colors | bit};
       if (repair) {
-        must_recompute.insert(successor);
-        if (enqueue(successor)) ++inserted;
+        if (request_repair(successor, edge.source)) ++inserted;
       } else if (offer_improvement(successor, it->second,
                                   *graph_.edge_weight(edge.source, edge.destination))) ++inserted;
     }
@@ -294,8 +311,7 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
         if ((key.colors & next_bit) == 0) {
           const StateKey successor{key.source, next, key.colors | next_bit};
           if (invalidated) {
-            must_recompute.insert(successor);
-            enqueue(successor);
+            request_repair(successor, key.destination);
           } else if (replacement) {
             offer_improvement(successor, *replacement, edge_weight);
           }
