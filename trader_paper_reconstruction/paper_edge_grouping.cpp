@@ -23,93 +23,52 @@ bool contains(const Cycle& cycle, const DirectedEdge& edge) {
 }
 }
 
-CandidateCycles::CandidateCycles(const DirectedWeightedGraph& graph,
-                                const ColorMap& colors, std::uint32_t k)
-    : colors_(colors), k_(k) {
-  if (k < 2 || k > 63) throw std::invalid_argument("k must be in [2,63]");
-  for (auto vertex : graph.vertices())
-    if (colors_.at(vertex) >= k_) throw std::invalid_argument("color out of range");
-  // Explicit initialization cost: enumerate the maintained candidate universe.
-  for (auto root : graph.vertices()) {
-    Cycle path{root};
-    extend(graph, path, ColorMask{1} << colors_.at(root));
-  }
+CandidateCycles::CandidateCycles(const PaperLayerwiseBatchMaintainer& model)
+    : full_mask_((ColorMask{1} << model.hop_bound()) - 1) {
+  // At most one state lookup per closing edge, not a cycle enumeration.
+  for (const auto& edge : model.graph().edges())
+    put(model, {edge.destination, edge.source});
 }
 
-void CandidateCycles::extend(const DirectedWeightedGraph& graph, Cycle& path, ColorMask mask) {
-  if (path.size() == k_) {
-    if (graph.has_edge(path.back(), path.front())) {
-      Cycle closed = path; closed.push_back(path.front()); put(graph, std::move(closed));
-    }
-    return;
+void CandidateCycles::remove(const DirectedEdge& key) {
+  const auto found = representatives_.find(key);
+  if (found == representatives_.end()) return;
+  const auto reference = references_.find(found->second);
+  if (--reference->second == 0) {
+    const auto value = values_.find(found->second);
+    ordered_.erase({value->second, value->first});
+    values_.erase(value); references_.erase(reference);
   }
-  for (const auto& [next, weight] : graph.outgoing(path.back())) {
-    (void)weight;
-    const auto color = colors_.at(next);
-    if (color >= k_) throw std::invalid_argument("color out of range");
-    const ColorMask bit = ColorMask{1} << color;
-    if (mask & bit) continue;
-    path.push_back(next); extend(graph, path, mask | bit); path.pop_back();
-  }
+  representatives_.erase(found);
 }
 
-void CandidateCycles::discover(const DirectedWeightedGraph& graph, const DirectedEdge& edge) {
-  if (!graph.has_edge(edge.source, edge.destination)) return;
-  const auto a = colors_.at(edge.source), b = colors_.at(edge.destination);
-  if (a == b) return;
-  Cycle path{edge.source, edge.destination};
-  extend(graph, path, (ColorMask{1} << a) | (ColorMask{1} << b));
-}
-
-void CandidateCycles::remove(const Cycle& cycle) {
-  auto found = values_.find(cycle);
-  if (found == values_.end()) return;
-  ordered_.erase({found->second, cycle}); values_.erase(found);
-  for (std::size_t i = 1; i < cycle.size(); ++i) {
-    const DirectedEdge edge{cycle[i-1], cycle[i]};
-    auto bucket = incidence_.find(edge);
-    bucket->second.erase(cycle);
-    if (bucket->second.empty()) incidence_.erase(bucket);
-  }
-}
-
-void CandidateCycles::put(const DirectedWeightedGraph& graph, Cycle cycle) {
+void CandidateCycles::put(const PaperLayerwiseBatchMaintainer& model,
+                          const DirectedEdge& key) {
+  if (!model.graph().has_edge(key.destination, key.source)) return;
+  const auto state = model.states().find({key.source, key.destination, full_mask_});
+  if (state == model.states().end()) return;
+  Cycle cycle = state->second.path; cycle.push_back(key.source);
   cycle = canonical(std::move(cycle));
   double weight = 0;
-  for (std::size_t i = 1; i < cycle.size(); ++i) {
-    auto w = graph.edge_weight(cycle[i-1], cycle[i]);
-    if (!w) { remove(cycle); return; }
-    weight += *w;
-  }
-  if (!std::isfinite(weight)) throw std::runtime_error("nonfinite cycle weight");
-  const auto found = values_.find(cycle);
-  if (found != values_.end()) {
-    // Reweighting does not change edge incidence. Keep those index entries.
-    if (found->second == weight) return;
-    ordered_.erase({found->second, cycle});
-    found->second = weight;
-    ordered_.insert({weight, cycle});
-    return;
-  }
-  values_[cycle] = weight; ordered_.insert({weight, cycle});
   for (std::size_t i = 1; i < cycle.size(); ++i)
-    incidence_[{cycle[i-1], cycle[i]}].insert(cycle);
+    weight += *model.graph().edge_weight(cycle[i-1], cycle[i]);
+  if (!std::isfinite(weight)) throw std::runtime_error("nonfinite cycle weight");
+  const auto previous = values_.find(cycle);
+  if (previous != values_.end()) ordered_.erase({previous->second, cycle});
+  values_[cycle] = weight; ordered_.insert({weight, cycle});
+  ++references_[cycle]; representatives_[key] = std::move(cycle);
 }
 
-void CandidateCycles::update(const DirectedWeightedGraph& before,
-                             const DirectedWeightedGraph& after,
-                             const std::vector<EdgeUpdate>& updates) {
-  std::set<DirectedEdge> touched;
-  for (const auto& update : updates) touched.insert({update.source, update.destination});
-  std::set<Cycle> dirty;
-  for (const auto& edge : touched) {
-    auto found = incidence_.find(edge);
-    if (found != incidence_.end()) dirty.insert(found->second.begin(), found->second.end());
-  }
-  for (const auto& cycle : dirty) put(after, cycle);
-  for (const auto& edge : touched)
-    if (!before.has_edge(edge.source, edge.destination) && after.has_edge(edge.source, edge.destination))
-      discover(after, edge);
+void CandidateCycles::update(const PaperLayerwiseBatchMaintainer& model,
+                             const LayerwiseBatchApplication& event) {
+  std::set<DirectedEdge> dirty(event.changed_closed_states.begin(),
+                               event.changed_closed_states.end());
+  // A closing edge can change even when its reverse full-color DP state does
+  // not. Include insertions and deletions as well as reweights.
+  for (const auto& edge : event.effective_updates)
+    dirty.insert({edge.destination, edge.source});
+  for (const auto& key : dirty) remove(key);
+  for (const auto& key : dirty) put(model, key);
 }
 
 CycleAnswer CandidateCycles::best() const {
@@ -126,7 +85,7 @@ double CandidateCycles::gap() const {
 PaperEdgeGrouping::PaperEdgeGrouping(DirectedWeightedGraph graph, ColorMap colors,
                                    std::uint32_t k, DependencyGraphMode mode)
     : model_(graph, colors, k), live_(std::move(graph)),
-      candidates_(live_, colors, k), mode_(mode),
+      candidates_(model_), mode_(mode),
       anchor_(candidates_.best()), gap_(candidates_.gap()) {}
 
 GroupingEvent PaperEdgeGrouping::update(const EdgeUpdate& update) {
@@ -172,7 +131,6 @@ GroupingEvent PaperEdgeGrouping::flush() {
   using Clock = std::chrono::steady_clock;
   auto started = Clock::now();
 #endif
-  const auto before = model_.graph();
 #ifdef TRADER_PROFILE
   auto snapshot = Clock::now();
 #endif
@@ -180,7 +138,7 @@ GroupingEvent PaperEdgeGrouping::flush() {
 #ifdef TRADER_PROFILE
   auto dp = Clock::now();
 #endif
-  candidates_.update(before, model_.graph(), pending_);
+  candidates_.update(model_, result.layerwise);
 #ifdef TRADER_PROFILE
   auto candidate = Clock::now();
   result.snapshot_ms = std::chrono::duration<double,std::milli>(snapshot-started).count();

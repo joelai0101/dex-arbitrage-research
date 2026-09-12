@@ -178,7 +178,7 @@ int main(int argc, char** argv) { try {
 #endif
   std::cout << ",\"maintenance_batches\":" << batches << ",\"deferred_instance_updates\":" << deferred
             << ",\"dp_states_processed\":" << states_processed << ",\"candidate_cycles\":" << candidates
-            << ",\"states\":" << states << ",\"grouping_scope\":\"per_coloring\",\"dag_mode\":\"" << mode_name << "\"";
+            << ",\"states\":" << states << ",\"candidate_scope\":\"dp_closure_representatives\",\"grouping_scope\":\"per_coloring\",\"dag_mode\":\"" << mode_name << "\"";
 #ifdef TRADER_PROFILE
   std::cout << ",\"profiled\":true,\"snapshot_ms\":" << snapshot_ms << ",\"dp_ms\":" << dp_ms << ",\"candidate_ms\":" << candidate_ms;
 #endif

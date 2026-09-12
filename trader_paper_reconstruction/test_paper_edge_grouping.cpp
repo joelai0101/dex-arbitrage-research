@@ -1,6 +1,9 @@
 #include "paper_edge_grouping.h"
+#include <algorithm>
 #include <cmath>
+#include <functional>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <stdexcept>
 
@@ -9,6 +12,38 @@ namespace {
 std::size_t checks = 0;
 void require(bool condition, const char* message) {
   if (!condition) throw std::runtime_error(message);
+}
+std::vector<double> all_cycle_weights(const DirectedWeightedGraph& graph,
+                                      const ColorMap& colors, std::uint32_t k) {
+  std::vector<double> weights;
+  for (auto root : graph.vertices()) {
+    std::vector<VertexId> path{root};
+    std::function<void(ColorMask,double)> visit = [&](ColorMask mask, double weight) {
+      if (path.size() == k) {
+        const auto closing = graph.edge_weight(path.back(), root);
+        if (closing) weights.push_back(weight + *closing);
+        return;
+      }
+      for (const auto& [next,w] : graph.outgoing(path.back())) {
+        const ColorMask bit = ColorMask{1} << colors.at(next);
+        if (next <= root || (mask & bit)) continue;
+        path.push_back(next); visit(mask | bit, weight+w); path.pop_back();
+      }
+    };
+    visit(ColorMask{1} << colors.at(root), 0);
+  }
+  std::sort(weights.begin(),weights.end()); return weights;
+}
+void verify_top_two(const PaperLayerwiseBatchMaintainer& model,
+                    const CycleAnswer& best, double gap) {
+  const auto weights = all_cycle_weights(model.graph(),model.colors(),model.hop_bound());
+  require(best.exists == !weights.empty(), "DP closure candidate existence mismatch");
+  if (!weights.empty()) require(std::abs(best.weight-weights[0]) < 1e-9, "DP closure best mismatch");
+  const double expected_gap = weights.empty() ? 0 : weights.size()==1
+      ? std::numeric_limits<double>::infinity() : weights[1]-weights[0];
+  require(gap == expected_gap || std::abs(gap-expected_gap) < 1e-9,
+          "DP closure distinct runner-up gap mismatch");
+  ++checks;
 }
 void verify(const PaperEdgeGrouping& engine, bool maintained) {
   const auto expected = enumerate_cycle_oracle(engine.live_graph(), engine.model().colors(), engine.model().hop_bound());
@@ -21,6 +56,7 @@ void verify(const PaperEdgeGrouping& engine, bool maintained) {
   if (maintained) {
     const auto states = enumerate_state_oracle(engine.live_graph(), engine.model().colors(), engine.model().hop_bound());
     require(compare_state_tables(states, engine.model().states(), 1e-9).equal, "DP state mismatch after maintenance");
+    verify_top_two(engine.model(),actual,engine.maintained_gap());
   }
   ++checks;
 }
@@ -81,27 +117,73 @@ void same_color_updates_do_not_trigger() {
     empty.flush(); verify(empty,true);
   }
 }
-void candidate_reweight_incidence() {
+void candidate_reweight_closure() {
   DirectedWeightedGraph graph; ColorMap colors{{0,0},{1,1},{2,2},{3,1},{4,2}};
   graph.set_edge(0,1,-1); graph.set_edge(1,2,-1); graph.set_edge(2,0,-1);
   graph.set_edge(0,3,0); graph.set_edge(3,4,0); graph.set_edge(4,0,0);
-  CandidateCycles candidates(graph, colors, 3);
+  PaperLayerwiseBatchMaintainer model(graph, colors, 3);
+  CandidateCycles candidates(model);
+  auto apply = [&](const EdgeUpdate& update) {
+    const auto event = model.apply_batch({update});
+    candidates.update(model,event);
+    verify_top_two(model,candidates.best(),candidates.gap());
+  };
   for (double weight : {-2.0, -2.0, 3.0, -3.0}) {
-    auto before = graph; graph.set_edge(0,1,weight);
-    candidates.update(before,graph,{{0,1,weight,false,"reweight",1}});
+    graph.set_edge(0,1,weight);
+    apply({0,1,weight,false,"reweight",1});
     require(candidates.size()==2, "reweight must retain distinct candidates");
     require(candidates.best().weight==enumerate_cycle_oracle(graph,colors,3).weight,
             "reweight ranking mismatch");
     ++checks;
   }
-  auto before = graph; graph.remove_edge(1,2);
-  candidates.update(before,graph,{{1,2,0,true,"delete other edge",2}});
+  graph.remove_edge(1,2);
+  apply({1,2,0,true,"delete other edge",2});
   require(candidates.size()==1 && candidates.best().weight==0,
           "reweight must preserve incidence on other cycle edges"); ++checks;
-  before = graph; graph.set_edge(1,2,-1);
-  candidates.update(before,graph,{{1,2,-1,false,"restore",3}});
+  graph.set_edge(1,2,-1);
+  apply({1,2,-1,false,"restore",3});
   require(candidates.size()==2 && candidates.best().weight==-5,
           "restored cycle must be rediscovered after reweight/delete"); ++checks;
+}
+void compressed_candidates_and_mixed_batches() {
+  // K5 has 24 distinct directed Hamiltonian cycles, but only 20 closing edges.
+  DirectedWeightedGraph graph; ColorMap colors;
+  for (VertexId u=0;u<5;++u) {
+    colors[u]=u;
+    for (VertexId v=0;v<5;++v) if (u!=v) graph.set_edge(u,v,0);
+  }
+  PaperLayerwiseBatchMaintainer model(graph,colors,5);
+  CandidateCycles candidates(model);
+  require(all_cycle_weights(graph,colors,5).size()==24, "complete-5 cycle oracle count");
+  require(candidates.size()<24 && candidates.gap()==0, "compression must retain distinct tied runner-up");
+  verify_top_two(model,candidates.best(),candidates.gap());
+  std::mt19937 rng(9132026);
+  for (std::uint32_t k=2;k<=5;++k) for (int trial=0;trial<8;++trial) {
+    DirectedWeightedGraph g; ColorMap c;
+    const VertexId n=k+2;
+    for (VertexId u=0;u<n;++u) {
+      g.add_vertex(u); c[u]=u%k;
+      for (VertexId v=0;v<n;++v) if (u!=v && rng()%3!=0)
+        g.set_edge(u,v,(int(rng()%13)-6)/4.0);
+    }
+    PaperLayerwiseBatchMaintainer m(g,c,k); CandidateCycles index(m);
+    verify_top_two(m,index.best(),index.gap());
+    for (std::size_t row=1;row<=40;++row) {
+      std::vector<EdgeUpdate> updates;
+      for (int i=0;i<4;++i) {
+        const VertexId u=rng()%n; VertexId v=rng()%n; if(u==v) v=(v+1)%n;
+        updates.push_back({u,v,(int(rng()%17)-8)/4.0,rng()%4==0,"mixed",row});
+      }
+      const auto event=m.apply_batch(updates,trial%2 ? DependencyGraphMode::UpdateEdgesOnly : DependencyGraphMode::VertexInduced);
+      index.update(m,event);
+      verify_top_two(m,index.best(),index.gap());
+      // Full reconstruction checks both newly exposed and removed representatives.
+      CandidateCycles rebuilt(m);
+      require(index.size()==rebuilt.size(), "incremental representative cardinality mismatch");
+      require(index.best().exists==rebuilt.best().exists, "rebuilt representative existence mismatch");
+      if(index.best().exists) require(index.best().weight==rebuilt.best().weight, "rebuilt representative weight mismatch");
+    }
+  }
 }
 void randomized() {
   std::mt19937 random(9122026);
@@ -131,6 +213,7 @@ void randomized() {
 int main() {
   boundaries(DependencyGraphMode::UpdateEdgesOnly);
   boundaries(DependencyGraphMode::VertexInduced);
-  single_candidate(); same_color_updates_do_not_trigger(); candidate_reweight_incidence(); randomized();
+  single_candidate(); same_color_updates_do_not_trigger(); candidate_reweight_closure();
+  compressed_candidates_and_mixed_batches(); randomized();
   std::cout << "Algorithm 4 checks passed: " << checks << " answer/state checkpoints\n";
 }

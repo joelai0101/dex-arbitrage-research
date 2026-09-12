@@ -24,6 +24,9 @@ struct LayerwiseBatchApplication {
   std::size_t processed_state_keys = 0;
   std::size_t changed_state_keys = 0;
   std::size_t removed_state_keys = 0;
+  // Changed full-color states with a closing edge in the final graph. These
+  // drive candidate maintenance without scanning the resident DP table.
+  std::vector<DirectedEdge> changed_closed_states;
   bool cross_dag_vertex_overlap = false;
   bool effective_update_coverage = false;
   bool every_state_processed_at_most_once = false;

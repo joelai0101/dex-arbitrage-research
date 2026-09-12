@@ -353,6 +353,8 @@ LayerwiseBatchApplication PaperLayerwiseBatchMaintainer::apply_batch(
         continue;
       }
       ++result.changed_state_keys;
+      if (layer == hop_bound_ && graph_.has_edge(key.destination, key.source))
+        result.changed_closed_states.push_back({key.source, key.destination});
       for (const auto &[next, edge_weight] :
            graph_.outgoing(key.destination)) {
         const ColorMask next_bit = color_bit(colors_, next, hop_bound_);
