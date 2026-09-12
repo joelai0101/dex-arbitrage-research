@@ -338,9 +338,32 @@ void test_fixed_seed_generated_batches() {
   }
 }
 
+void test_repair_selects_prefix_before_materializing_path() {
+  ++suites;
+  DirectedWeightedGraph graph;
+  for (VertexId v = 0; v < 5; ++v) graph.add_vertex(v);
+  add_edges(graph, {{0, 1, 0}, {0, 2, 0}, {0, 3, 0},
+                    {1, 4, 3}, {2, 4, 2}, {3, 4, 1}, {4, 0, 0}});
+  PaperLayerwiseBatchMaintainer model(graph, {{0, 0}, {1, 1}, {2, 1}, {3, 1}, {4, 2}}, 3);
+  const auto check = [&](VertexId middle, const std::string &label) {
+    require_oracle_match(model, label);
+    const auto state = model.states().find({0, 4, 7});
+    require(state != model.states().end() &&
+            state->second.path == std::vector<VertexId>({0, middle, 4}), label);
+  };
+  check(3, "initial winner");
+  model.apply_batch({update(3, 4, 10, 1)}, DependencyGraphMode::UpdateEdgesOnly);
+  check(2, "repair replaces its first candidate with a better prefix");
+  model.apply_batch({update(2, 4, 3, 2)}, DependencyGraphMode::UpdateEdgesOnly);
+  check(1, "equal-weight repair preserves lexicographic witness");
+  model.apply_batch({update(1, 4, 0, 3, true)}, DependencyGraphMode::UpdateEdgesOnly);
+  check(2, "deletion selects remaining equal-weight prefix");
+}
+
 } // namespace
 
 int main() {
+  test_repair_selects_prefix_before_materializing_path();
   test_coalesced_dag_queue_contract();
   test_increase_deletion_and_alternative_paths();
   test_two_updated_edges_create_one_new_path();

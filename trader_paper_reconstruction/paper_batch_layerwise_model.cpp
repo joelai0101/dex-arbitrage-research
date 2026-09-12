@@ -69,7 +69,8 @@ std::optional<StateValue> recompute_state(const DirectedWeightedGraph &graph,
   }
 
   const ColorMask predecessor_mask = key.colors & ~destination_bit;
-  std::optional<StateValue> best;
+  const StateValue *best_prefix = nullptr;
+  double best_weight = 0;
   for (const auto &[predecessor, edge_weight] :
        graph.incoming(key.destination)) {
 #ifdef TRADER_PROFILE
@@ -89,15 +90,20 @@ std::optional<StateValue> recompute_state(const DirectedWeightedGraph &graph,
       continue;
     }
     const double weight = found->second.weight + edge_weight;
-    if (best && weight > best->weight) continue;
-    StateValue candidate{weight, {}};
-    candidate.path.reserve(found->second.path.size() + 1);
-    candidate.path.insert(candidate.path.end(), found->second.path.begin(), found->second.path.end());
-    candidate.path.push_back(key.destination);
-    if (!best.has_value() || better_candidate(candidate, *best)) {
-      best = std::move(candidate);
+    // Every candidate appends the same destination to an equal-length
+    // prefix. Compare those prefixes before allocating the winning path.
+    // The const state table is unchanged throughout this scan.
+    if (!best_prefix || weight < best_weight ||
+        (weight == best_weight && found->second.path < best_prefix->path)) {
+      best_prefix = &found->second;
+      best_weight = weight;
     }
   }
+  if (!best_prefix) return std::nullopt;
+  StateValue best{best_weight, {}};
+  best.path.reserve(best_prefix->path.size() + 1);
+  best.path.insert(best.path.end(), best_prefix->path.begin(), best_prefix->path.end());
+  best.path.push_back(key.destination);
   return best;
 }
 

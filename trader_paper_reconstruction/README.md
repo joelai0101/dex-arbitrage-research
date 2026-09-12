@@ -114,4 +114,13 @@ Local verification evidence is stored outside Git in `.research_data/common_benc
 
 ## Evidence and presentation boundaries
 
+Adverse-state recomputation selects the winning predecessor before constructing
+its path, allocating only the final witness. All predecessors are still scanned.
+For a fixed state, prefixes have equal length and append the same destination,
+so prefix lexicographic tie-breaking preserves the full-path ordering. The state
+table remains const during selection. A targeted regression covers successive
+candidate improvements, tied witnesses, and deletion of a selected predecessor;
+complete state and cycle oracles remain required. This local engineering change
+does not alter DP coverage, EG grouping, or the timing denominator.
+
 Show performance/Regret values only after executable verification. Keep this variant separate from `TRADER-corrected` and paper-reported numbers. Present English table values to two decimal places, retain full precision in raw results, and compare best/ties using unrounded values. A nonzero positive value smaller than 0.005 should display `<0.01` rather than imply exact zero; explain rounded displays in a table footnote.
