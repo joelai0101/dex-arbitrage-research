@@ -1,0 +1,296 @@
+#include "paper_batch_layerwise_model.h"
+
+#include <cmath>
+#include <cstdlib>
+#include <iostream>
+#include <random>
+#include <string>
+#include <tuple>
+#include <vector>
+
+namespace {
+
+using trader::paper_batch::ColorMap;
+using trader::paper_batch::DependencyGraphMode;
+using trader::paper_batch::DirectedWeightedGraph;
+using trader::paper_batch::EdgeUpdate;
+using trader::paper_batch::LayerwiseBatchApplication;
+using trader::paper_batch::PaperLayerwiseBatchMaintainer;
+using trader::paper_batch::SchedulePolicy;
+using trader::paper_batch::StateTable;
+using trader::paper_batch::TieBreakDirection;
+using trader::paper_batch::VertexId;
+
+int suites = 0;
+int generated_checkpoints = 0;
+
+void require(bool condition, const std::string &message) {
+  if (!condition) {
+    std::cerr << "BL-4 failure: " << message << '\n';
+    std::abort();
+  }
+}
+
+EdgeUpdate update(VertexId source, VertexId destination, double weight,
+                  std::size_t arrival, bool erase = false) {
+  return {
+      source, destination, weight, erase, "event-" + std::to_string(arrival),
+      arrival};
+}
+
+void add_edges(
+    DirectedWeightedGraph &graph,
+    const std::vector<std::tuple<VertexId, VertexId, double>> &edges) {
+  for (const auto &[source, destination, weight] : edges) {
+    graph.set_edge(source, destination, weight);
+  }
+}
+
+void require_oracle_match(const PaperLayerwiseBatchMaintainer &maintainer,
+                          const std::string &context) {
+  const StateTable oracle = trader::paper_batch::enumerate_state_oracle(
+      maintainer.graph(), maintainer.colors(), maintainer.hop_bound());
+  const auto comparison =
+      trader::paper_batch::compare_state_tables(oracle, maintainer.states());
+  require(comparison.equal,
+          context + ": state mismatch: " + comparison.first_difference);
+
+  const auto expected_answer = trader::paper_batch::enumerate_cycle_oracle(
+      maintainer.graph(), maintainer.colors(), maintainer.hop_bound());
+  const auto actual_answer = maintainer.answer();
+  require(expected_answer.exists == actual_answer.exists,
+          context + ": answer existence mismatch");
+  if (expected_answer.exists) {
+    require(std::abs(expected_answer.weight - actual_answer.weight) <= 1e-12,
+            context + ": answer weight mismatch");
+    require(expected_answer.cycle == actual_answer.cycle,
+            context + ": answer witness mismatch");
+  }
+}
+
+void require_application_contract(const LayerwiseBatchApplication &application,
+                                  const std::string &context) {
+  require(application.effective_update_coverage,
+          context + ": effective edge not applied exactly once per direction");
+  require(application.forward_applied_updates.size() ==
+              application.effective_updates.size(),
+          context + ": forward apply count mismatch");
+  require(application.backward_applied_updates.size() ==
+              application.effective_updates.size(),
+          context + ": backward apply count mismatch");
+  require(application.every_state_processed_at_most_once,
+          context + ": DP state was revisited in a layer-wise pass");
+  require(application.queued_state_keys == application.processed_state_keys,
+          context + ": queued DP state was not processed");
+}
+
+void test_coalesced_dag_queue_contract() {
+  ++suites;
+  DirectedWeightedGraph graph;
+  for (VertexId vertex = 0; vertex < 5; ++vertex) {
+    graph.add_vertex(vertex);
+  }
+  add_edges(graph, {{0, 1, 2.0},
+                    {1, 2, 2.0},
+                    {2, 0, 2.0},
+                    {2, 3, 2.0},
+                    {3, 4, 2.0},
+                    {4, 2, 2.0}});
+  const ColorMap colors{{0, 0}, {1, 1}, {2, 2}, {3, 0}, {4, 1}};
+  PaperLayerwiseBatchMaintainer maintainer(graph, colors, 3);
+  const auto application =
+      maintainer.apply_batch({update(0, 1, -1.0, 0), update(0, 1, -2.0, 1),
+                              update(1, 2, -2.0, 2), update(2, 0, -2.0, 3)},
+                             DependencyGraphMode::UpdateEdgesOnly);
+  require(application.schedule.coalesced_updates.size() == 3,
+          "same directed edge must retain only the final update");
+  require(application.schedule.dags.size() >= 2,
+          "cyclic update edges must be split into multiple DAGs");
+  require(application.cross_dag_vertex_overlap,
+          "cycle split must expose cross-DAG vertex overlap");
+  require_application_contract(application, "coalesced DAG queue");
+  require_oracle_match(maintainer, "coalesced DAG queue");
+}
+
+void test_increase_deletion_and_alternative_paths() {
+  ++suites;
+  DirectedWeightedGraph graph;
+  add_edges(graph,
+            {{0, 1, 0.0}, {1, 2, 0.0}, {0, 3, 1.0}, {3, 2, 1.0}, {2, 0, 0.0}});
+  const ColorMap colors{{0, 0}, {1, 1}, {2, 2}, {3, 1}};
+  PaperLayerwiseBatchMaintainer maintainer(graph, colors, 3);
+
+  auto application = maintainer.apply_batch(
+      {update(1, 2, 10.0, 0)}, DependencyGraphMode::UpdateEdgesOnly);
+  require(application.backward_invalidation_seeds > 0,
+          "weight increase must invalidate at least one selected witness");
+  require_application_contract(application, "weight increase");
+  require_oracle_match(maintainer, "weight increase");
+  require(std::abs(maintainer.answer().weight - 2.0) <= 1e-12,
+          "weight increase must select the alternative path");
+
+  application = maintainer.apply_batch({update(3, 2, 0.0, 1, true)},
+                                       DependencyGraphMode::VertexInduced);
+  require_application_contract(application, "edge deletion");
+  require_oracle_match(maintainer, "edge deletion");
+  require(maintainer.answer().exists &&
+              std::abs(maintainer.answer().weight - 10.0) <= 1e-12,
+          "deleting the alternative path must leave the positive cycle");
+}
+
+void test_two_updated_edges_create_one_new_path() {
+  ++suites;
+  DirectedWeightedGraph graph;
+  for (VertexId vertex = 0; vertex < 4; ++vertex) {
+    graph.add_vertex(vertex);
+  }
+  graph.set_edge(2, 0, 0.0);
+  graph.set_edge(0, 3, 5.0);
+  graph.set_edge(3, 2, 5.0);
+  const ColorMap colors{{0, 0}, {1, 1}, {2, 2}, {3, 1}};
+  PaperLayerwiseBatchMaintainer maintainer(graph, colors, 3);
+  const auto application =
+      maintainer.apply_batch({update(0, 1, -2.0, 0), update(1, 2, -2.0, 1)},
+                             DependencyGraphMode::UpdateEdgesOnly);
+  require(application.forward_candidate_seeds > 0,
+          "insertions must seed forward DP candidates");
+  require_application_contract(application, "two-edge insertion");
+  require_oracle_match(maintainer, "two-edge insertion");
+  require(std::abs(maintainer.answer().weight - (-4.0)) <= 1e-12,
+          "two inserted edges must form the new best cycle");
+}
+
+std::vector<SchedulePolicy> all_policies() {
+  std::vector<SchedulePolicy> result;
+  for (const auto vertex_ties :
+       {TieBreakDirection::Ascending, TieBreakDirection::Descending}) {
+    for (const auto edge_ties :
+         {TieBreakDirection::Ascending, TieBreakDirection::Descending}) {
+      for (const auto topological_ties :
+           {TieBreakDirection::Ascending, TieBreakDirection::Descending}) {
+        for (const bool reverse_dags : {false, true}) {
+          result.push_back(
+              {vertex_ties, edge_ties, topological_ties, reverse_dags});
+        }
+      }
+    }
+  }
+  return result;
+}
+
+void test_layerwise_result_is_independent_of_legal_ties() {
+  ++suites;
+  DirectedWeightedGraph graph;
+  for (VertexId vertex = 0; vertex < 7; ++vertex) {
+    graph.add_vertex(vertex);
+  }
+  add_edges(graph, {{0, 1, 1.0},
+                    {1, 2, 1.0},
+                    {2, 0, 1.0},
+                    {0, 3, 2.0},
+                    {3, 2, 2.0},
+                    {2, 4, 1.0},
+                    {4, 5, 1.0},
+                    {5, 2, 1.0},
+                    {1, 6, 1.0},
+                    {6, 0, 1.0}});
+  const ColorMap colors{{0, 0}, {1, 1}, {2, 2}, {3, 1}, {4, 0}, {5, 1}, {6, 2}};
+  const std::vector<EdgeUpdate> updates{
+      update(0, 1, -2.0, 0), update(1, 2, -2.0, 1), update(2, 0, -2.0, 2),
+      update(2, 4, -1.0, 3), update(4, 5, -1.0, 4), update(5, 2, -1.0, 5),
+      update(1, 6, 4.0, 6)};
+
+  StateTable reference;
+  bool have_reference = false;
+  for (const SchedulePolicy &policy : all_policies()) {
+    PaperLayerwiseBatchMaintainer maintainer(graph, colors, 3);
+    const auto application = maintainer.apply_batch(
+        updates, DependencyGraphMode::UpdateEdgesOnly, policy);
+    require_application_contract(application, "legal tie policy");
+    require_oracle_match(maintainer, "legal tie policy");
+    if (!have_reference) {
+      reference = maintainer.states();
+      have_reference = true;
+    } else {
+      const auto comparison = trader::paper_batch::compare_state_tables(
+          reference, maintainer.states());
+      require(comparison.equal,
+              "legal Algorithm 3 tie choices changed the final DP state");
+    }
+  }
+}
+
+void test_fixed_seed_generated_batches() {
+  ++suites;
+  std::mt19937 generator(20260904U);
+  std::uniform_int_distribution<int> weight(-4, 6);
+  std::uniform_int_distribution<int> vertex(0, 6);
+  std::bernoulli_distribution edge_present(0.32);
+
+  for (const std::uint32_t hop_bound : {3U, 4U}) {
+    for (int graph_index = 0; graph_index < 18; ++graph_index) {
+      DirectedWeightedGraph graph;
+      ColorMap colors;
+      for (VertexId id = 0; id < 7; ++id) {
+        graph.add_vertex(id);
+        colors[id] = id % hop_bound;
+      }
+      for (VertexId source = 0; source < 7; ++source) {
+        for (VertexId destination = 0; destination < 7; ++destination) {
+          if (source != destination && edge_present(generator)) {
+            graph.set_edge(source, destination,
+                           static_cast<double>(weight(generator)));
+          }
+        }
+      }
+
+      PaperLayerwiseBatchMaintainer maintainer(graph, colors, hop_bound);
+      require_oracle_match(maintainer,
+                           "generated initial " + std::to_string(graph_index));
+      for (int batch_index = 0; batch_index < 8; ++batch_index) {
+        std::vector<EdgeUpdate> updates;
+        for (int item = 0; item < 4; ++item) {
+          VertexId source = static_cast<VertexId>(vertex(generator));
+          VertexId destination = static_cast<VertexId>(vertex(generator));
+          while (destination == source) {
+            destination = static_cast<VertexId>(vertex(generator));
+          }
+          const std::size_t arrival =
+              static_cast<std::size_t>(batch_index * 10 + item);
+          updates.push_back(update(source, destination,
+                                   static_cast<double>(weight(generator)),
+                                   arrival, item == 3 && batch_index % 4 == 0));
+          if (item == 1 && batch_index % 3 == 0) {
+            updates.push_back(update(source, destination,
+                                     static_cast<double>(weight(generator)),
+                                     arrival + 5));
+          }
+        }
+        const auto application = maintainer.apply_batch(
+            updates, batch_index % 2 == 0 ? DependencyGraphMode::UpdateEdgesOnly
+                                          : DependencyGraphMode::VertexInduced);
+        const std::string context = "generated k=" + std::to_string(hop_bound) +
+                                    " graph=" + std::to_string(graph_index) +
+                                    " batch=" + std::to_string(batch_index);
+        require_application_contract(application, context);
+        require_oracle_match(maintainer, context);
+        ++generated_checkpoints;
+      }
+    }
+  }
+}
+
+} // namespace
+
+int main() {
+  test_coalesced_dag_queue_contract();
+  test_increase_deletion_and_alternative_paths();
+  test_two_updated_edges_create_one_new_path();
+  test_layerwise_result_is_independent_of_legal_ties();
+  test_fixed_seed_generated_batches();
+  std::cout << "BL-4 passed: " << suites << " suites, including "
+            << generated_checkpoints
+            << " generated checkpoints, with Algorithm-3 queue coverage and "
+               "complete state/answer-oracle equality.\n";
+  return 0;
+}
