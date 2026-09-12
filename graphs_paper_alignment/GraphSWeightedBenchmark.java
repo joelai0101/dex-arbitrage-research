@@ -43,17 +43,38 @@ public class GraphSWeightedBenchmark {
                 if(!colorful||colors[u.u]!=colors[u.v])graph.addEdge(vertices.get(u.u),vertices.get(u.v),new CustomEdge(true,0));}}
         simulator=new Simulator(graph,k,threshold,path->allowed(path,0));
         System.err.println("STAGE hp_index_ready; building weighted global candidate cache");
+        long cacheStart=System.nanoTime();
+        int[] path=new int[k];boolean[] used=new boolean[colors.length];
         for(int root=0;root<colors.length;root++) {
-            final int minimum=root;
-            for(CustomEdge closing:graph.incomingEdgesOf(vertices.get(root))) {
-                int end=Integer.parseInt(closing.getSource().getId());if(end<=root)continue;
-                for(List<CustomVertex> p:simulator.findPaths(vertices.get(root),closing.getSource(),path->allowed(path,minimum))) {
-                    List<CustomVertex> closed=new ArrayList<>(p);closed.add(vertices.get(root));
-                    List<Integer> key=canonical(closed);if(key!=null)refresh(key);
-                }
-            }
+            path[0]=root;used[root]=true;
+            initializeCandidates(graph,root,1,path,used,colorful?1<<colors[root]:0);
+            used[root]=false;
         }
+        System.err.println("STAGE candidate_cache_ready; candidates="+candidates.size()+
+            "; cache_ms="+(System.nanoTime()-cacheStart)/1e6);
         simulator.graphEdgeVisits=simulator.indexEdgeVisits=0;cyclesEnumerated=0;
+    }
+    // Build the initial global cache once per canonical root, rather than
+    // repeating a bounded path query for each closing edge. Online discovery
+    // and maintenance still use the same HP-Index backend below.
+    void initializeCandidates(Graph<CustomVertex,CustomEdge> graph,int root,int depth,
+                              int[] path,boolean[] used,int mask) {
+        int current=path[depth-1];
+        if(depth==k) {
+            if(!graph.containsEdge(vertices.get(current),vertices.get(root)))return;
+            List<Integer> cycle=new ArrayList<>(k+1);
+            for(int vertex:path)cycle.add(vertex);
+            cycle.add(root);refresh(cycle);return;
+        }
+        for(CustomEdge e:graph.outgoingEdgesOf(vertices.get(current))) {
+            int next=Integer.parseInt(e.getTarget().getId());
+            if(next<=root||used[next])continue;
+            int bit=colorful?1<<colors[next]:0;
+            if(colorful&&(mask&bit)!=0)continue;
+            path[depth]=next;used[next]=true;
+            initializeCandidates(graph,root,depth+1,path,used,mask|bit);
+            used[next]=false;
+        }
     }
     boolean allowed(List<CustomVertex> path,int minimum) {
         int mask=0;

@@ -4,6 +4,20 @@ import java.util.*;
 /** Independent adjacency-matrix oracle; no HP-Index calls in expected answers. */
 public class GraphSPaperTest {
     static double best;
+    static Map<List<Integer>,Double> allCandidates;
+    static void enumerateCandidates(double[][] g,int root,List<Integer> path,boolean[] used,int k) {
+        int last=path.get(path.size()-1);
+        if(path.size()==k) {
+            if(!Double.isFinite(g[last][root]))return;
+            var cycle=new ArrayList<>(path);cycle.add(root);double weight=0;
+            for(int i=1;i<cycle.size();i++)weight+=g[cycle.get(i-1)][cycle.get(i)];
+            allCandidates.put(cycle,weight);return;
+        }
+        for(int next=root+1;next<g.length;next++)if(!used[next]&&Double.isFinite(g[last][next])) {
+            used[next]=true;path.add(next);enumerateCandidates(g,root,path,used,k);
+            path.remove(path.size()-1);used[next]=false;
+        }
+    }
     static void dfs(double[][] g,int root,int v,int left,boolean[] used,double w) {
         if(left==0) { if(Double.isFinite(g[v][root]))best=Math.min(best,w+g[v][root]); return; }
         for(int next=0;next<g.length;next++)if(!used[next]&&Double.isFinite(g[v][next])) {
@@ -12,14 +26,21 @@ public class GraphSPaperTest {
     }
     static double expected(double[][] g,int k) {
         best=Double.POSITIVE_INFINITY;
+        allCandidates=new HashMap<>();
         for(int root=0;root<g.length;root++) {
             boolean[] used=new boolean[g.length]; used[root]=true; dfs(g,root,root,k-1,used,0);
+            enumerateCandidates(g,root,new ArrayList<>(List.of(root)),used,k);
         }
         return best;
     }
     static void verify(GraphSWeightedBenchmark e,double[][] g,int k,double reference) {
         double actual=e.ranking.isEmpty()?Double.POSITIVE_INFINITY:e.ranking.first().weight;
         if(actual!=reference && Math.abs(actual-reference)>1e-10)throw new AssertionError(actual+" != "+reference);
+        if(!e.candidates.keySet().equals(allCandidates.keySet())||e.ranking.size()!=allCandidates.size())
+            throw new AssertionError("incomplete or duplicate global candidate cache");
+        for(var entry:allCandidates.entrySet())
+            if(Math.abs(e.candidates.get(entry.getKey()).weight-entry.getValue())>1e-10)
+                throw new AssertionError("stale non-best candidate");
         if(!e.ranking.isEmpty()) {
             var p=e.ranking.first().path;
             if(p.size()!=k+1||!p.get(0).equals(p.get(k))||new HashSet<>(p.subList(0,k)).size()!=k)throw new AssertionError("invalid cycle");
