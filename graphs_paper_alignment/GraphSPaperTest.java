@@ -1,8 +1,46 @@
 import java.nio.file.*;
 import java.util.*;
+import backend.*;
+import org.jgrapht.graph.DefaultDirectedGraph;
 
 /** Independent adjacency-matrix oracle; no HP-Index calls in expected answers. */
 public class GraphSPaperTest {
+    static int pathChecks;
+    static void enumeratePaths(double[][] g,int destination,List<Integer> path,int k,
+                               Set<List<Integer>> result) {
+        int current=path.get(path.size()-1);
+        if(current==destination){result.add(new ArrayList<>(path));return;}
+        if(path.size()==k)return;
+        for(int next=0;next<g.length;next++)if(Double.isFinite(g[current][next])&&!path.contains(next)) {
+            path.add(next);enumeratePaths(g,destination,path,k,result);path.remove(path.size()-1);
+        }
+    }
+    static void verifyPaths(GraphSWeightedBenchmark e,double[][] g,int k) {
+        for(int source=0;source<g.length;source++)for(int target=0;target<g.length;target++) {
+            Set<List<Integer>> expected=new HashSet<>(),actual=new HashSet<>();
+            enumeratePaths(g,target,new ArrayList<>(List.of(source)),k,expected);
+            for(var path:e.simulator.findPaths(e.vertices.get(source),e.vertices.get(target))) {
+                List<Integer> ids=new ArrayList<>();
+                for(var vertex:path)ids.add(Integer.parseInt(vertex.getId()));
+                actual.add(ids);
+            }
+            if(!actual.equals(expected))throw new AssertionError("incomplete bounded HP path set");
+            pathChecks++;
+        }
+    }
+    static void indexBudgetRegression() {
+        var graph=new DefaultDirectedGraph<CustomVertex,CustomEdge>(CustomEdge.class);
+        List<CustomVertex> vertices=new ArrayList<>();
+        for(int i=0;i<6;i++){var vertex=new CustomVertex(""+i);vertices.add(vertex);graph.addVertex(vertex);}
+        for(var u:vertices)for(var v:vertices)if(u!=v)graph.addEdge(u,v,new CustomEdge(true,0));
+        var simulator=new Simulator(graph,3,1);
+        simulator.indexEdgeVisits=0;
+        var paths=simulator.findPaths(vertices.get(0),vertices.get(1));
+        if(paths.size()!=5)throw new AssertionError("budget regression path count");
+        // Five first edges and four possible final edges, instead of 25 visits.
+        if(simulator.indexEdgeVisits!=9)
+            throw new AssertionError("bounded index visited "+simulator.indexEdgeVisits+" edges instead of 9");
+    }
     static double best;
     static Map<List<Integer>,Double> allCandidates;
     static void enumerateCandidates(double[][] g,int root,List<Integer> path,boolean[] used,int k) {
@@ -49,6 +87,10 @@ public class GraphSPaperTest {
         }
     }
     public static void main(String[] args)throws Exception {
+        indexBudgetRegression();
+        if(args.length==1&&args[0].equals("--index-budget-only")) {
+            System.out.println("GraphS bounded index regression passed");return;
+        }
         Path base=Path.of(args[0]);Files.createDirectories(base); int checks=0;
         for(int k=3;k<=5;k++)for(int seed=0;seed<20;seed++) {
             int n=7;Random rng=new Random(seed+1000*k);double[][] g=new double[n][n];
@@ -66,6 +108,7 @@ public class GraphSPaperTest {
             var second=new GraphSWeightedBenchmark(b,k,3,false);
             for(int row=0;row<=40;row++) {
                 double reference=expected(g,k);verify(first,g,k,reference);verify(second,g,k,reference);checks+=2;
+                verifyPaths(first,g,k);
                 if(row==40)break;
                 int u=rng.nextInt(n),v=rng.nextInt(n-1);if(v>=u)v++;
                 String value=row%11==0?"N":row%7==0?"D":Double.toString((rng.nextInt(25)-12)/4.0);
@@ -76,5 +119,6 @@ public class GraphSPaperTest {
             }
         }
         System.out.println("GraphS uncolored oracle/recoloring checks passed: "+checks);
+        System.out.println("GraphS exhaustive endpoint path-set checks passed: "+pathChecks);
     }
 }
