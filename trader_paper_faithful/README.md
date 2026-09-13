@@ -120,6 +120,33 @@ answer and every single/EG arrival, or batch boundary plus EOF remainder.
 
 ## Measurement and release boundary
 
+The 2026-09-13 indexed-storage revision keeps the full all-pairs state set,
+lexicographic witness ties, priority-queue ordering, repair ordering, DAG schedule,
+C1/C2 representation and EG trigger rule unchanged. Production DP lookups and
+edge-to-witness membership use hash containers. The ordered reference model and
+exhaustive oracles remain unchanged; tests convert the production table to an
+ordered snapshot only for comparison. Weight-only changes to an identical path
+leave its edge-incidence membership intact. Initialization consumes the reference
+table node-by-node rather than retaining two full tables. These are local storage
+optimizations, not claims about the author's unpublished container choices.
+
+Historical validated_v2 UNI1 ell1/prefix256 measured 682.766415625 ms/update
+and 4567.33203125 MiB, with 257 verified answers. Its matched profile attributed
+67.88% to propagation and 31.69% to invalidation/repair. New timings require a
+fresh build and the same frozen input; neither this prefix nor a lower ell may
+replace Table III's full-stream/ell80 measurement. Fixed-batch experiments remain
+separate from EG, whose buffered updates are flushed by the safety criterion.
+
+The indexed-storage UNI1 pilot completed at 325.67275703125 ms/update and
+4453.140625 MiB (initialization excluded). Its full input hashes, 257-answer
+trace and ten non-time counters match the previous version; independent oracle
+checks pass. Both release/profile builds again pass 574,241 unit checks and the
+24 multi-color streams. The matched new profile reports 323.277526171875
+ms/update, with repair 51.93% and propagation 46.60% of online time. These are
+single-run prefix diagnostics, not stable speedup estimates or paper-level
+performance. Full-stream/ell80 feasibility remains unestablished; do not promote
+this version into the main comparison table yet.
+
 Initialization (including DP, witness incidence and candidate ranking) is excluded
 from `online_ms`. Online includes input parsing, maintenance, queries, serialization
 and EOF flush. `core_ms` excludes input/output. Windows peak working set is measured

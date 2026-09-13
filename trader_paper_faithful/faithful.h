@@ -6,10 +6,29 @@
 #include <limits>
 #include <queue>
 #include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace trader::faithful {
 using namespace paper_batch;
 using Cycle = std::vector<VertexId>;
+// Storage-only optimization; the independently ordered reference DP is unchanged.
+struct StateHash {
+  std::size_t operator()(const StateKey& key) const {
+    std::uint64_t x=(std::uint64_t(key.source)<<32)|key.destination;
+    x^=key.colors*0x9e3779b97f4a7c15ULL;
+    x=(x^(x>>30))*0xbf58476d1ce4e5b9ULL;
+    x=(x^(x>>27))*0x94d049bb133111ebULL;
+    return x^(x>>31);
+  }
+};
+struct SameState {
+  bool operator()(const StateKey& a,const StateKey& b) const {
+    return a.source==b.source&&a.destination==b.destination&&a.colors==b.colors;
+  }
+};
+using IndexedStates=std::unordered_map<StateKey,StateValue,StateHash,SameState>;
+using WitnessStates=std::unordered_set<StateKey,StateHash,SameState>;
 inline std::size_t cardinality(ColorMask m) { std::size_t n=0;for(;m;m&=m-1)++n;return n; }
 inline Cycle canonical(Cycle p) {p.pop_back();std::rotate(p.begin(),std::min_element(p.begin(),p.end()),p.end());p.push_back(p.front());return p;}
 // Algorithm 3 source/sink edge queues with explicit predecessor/successor gates.
@@ -58,10 +77,10 @@ class Engine {
   ColorMap colors_;
   std::uint32_t k_;
   ColorMask full_;
-  StateTable dp_;
+  IndexedStates dp_;
   // Explicit engineering completion of the deletion/increase remark:
   // which selected witnesses actually use a changed edge?
-  std::map<DirectedEdge,std::set<StateKey>> witnesses_;
+  std::map<DirectedEdge,WitnessStates> witnesses_;
   std::set<DirectedEdge> dirty_closures_;
   std::map<DirectedEdge,Cycle> representatives_;
   std::map<Cycle,std::size_t> references_;
@@ -83,8 +102,14 @@ class Engine {
     auto old=dp_.find(key);
     if(old!=dp_.end()&&(old->second.weight<value.weight ||
        (old->second.weight==value.weight&&old->second.path<=value.path)))return false;
-    if(old!=dp_.end())unindex(key,old->second);
-    dp_[key]=value;index(key,value);mark(key);return true;
+    if(old!=dp_.end()){
+      // Weight-only changes do not alter which edges use this selected witness.
+      const bool changed_path=old->second.path!=value.path;
+      if(changed_path)unindex(key,old->second);
+      old->second=value;
+      if(changed_path)index(key,value);
+    }else {dp_.emplace(key,value);index(key,value);}
+    mark(key);return true;
   }
   // Algorithm 1: weight-ordered label-correcting queue, NOT Dijkstra.
   // Negative edges are valid; improved labels may be requeued. Colors grow.
@@ -129,11 +154,17 @@ public:
     full_=(ColorMask{1}<<k)-1;
     for(auto [v,c]:colors_){if(c>=k)throw std::invalid_argument("invalid color");graph_.add_vertex(v);}
     for(auto e:graph_.edges())if(e.source==e.destination)throw std::invalid_argument("self loop");
-    dp_=build_static_dp(graph_,colors_,k_);
-    for(const auto& [key,value]:dp_)index(key,value);
+    auto initial=build_static_dp(graph_,colors_,k_);
+    dp_.reserve(initial.size());
+    // Consume ordered nodes to avoid retaining a second complete table.
+    while(!initial.empty()){
+      auto node=initial.extract(initial.begin());
+      auto inserted=dp_.emplace(node.key(),std::move(node.mapped()));
+      index(inserted.first->first,inserted.first->second);
+    }
     for(auto edge:graph_.edges())put_rep({edge.destination,edge.source});
   }
-  const StateTable& states() const{return dp_;}
+  const IndexedStates& states() const{return dp_;}
   const DirectedWeightedGraph& graph()const{return graph_;}
   const ColorMap& colors()const{return colors_;}
   CycleAnswer best()const {if(ranking_.empty())return {};return {true,ranking_.begin()->first,ranking_.begin()->second};}

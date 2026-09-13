@@ -5,6 +5,7 @@
 using namespace trader::faithful;
 std::size_t checks=0;
 void require(bool ok,const char* message){++checks;if(!ok)throw std::runtime_error(message);}
+StateTable ordered(const IndexedStates& states){return {states.begin(),states.end()};}
 std::set<std::pair<double,Cycle>> cycles(const DirectedWeightedGraph& g,const ColorMap& colors,int k){
   std::set<std::pair<double,Cycle>> result;
   for(auto root:g.vertices()){
@@ -21,7 +22,7 @@ std::set<std::pair<double,Cycle>> cycles(const DirectedWeightedGraph& g,const Co
 }
 void check(const Engine& e,int k){
   const auto expected=enumerate_state_oracle(e.graph(),e.colors(),k);
-  auto comparison=compare_state_tables(expected,e.states());
+  auto comparison=compare_state_tables(expected,ordered(e.states()));
   if(!comparison.equal)throw std::runtime_error(comparison.first_difference);
   require(comparison.equal,"complete state table");
   for(auto& [key,value]:e.states()){
@@ -44,7 +45,7 @@ int main(){try{
   // A literal min(old,new) weight-increase treatment leaves -2 instead of +3.
   DirectedWeightedGraph g;g.set_edge(0,1,-1);g.set_edge(1,2,-1);g.set_edge(2,0,-1);
   ColorMap c{{0,0},{1,1},{2,2}};Engine e(g,c,3);
-  auto literal=e.states();g.set_edge(0,1,4);literal[{0,1,3}].weight=4;
+  auto literal=ordered(e.states());g.set_edge(0,1,4);literal[{0,1,3}].weight=4;
   require(!compare_state_tables(enumerate_state_oracle(g,c,3),literal).equal,"literal increase counterexample disappeared");
   e.apply_batch({upd(0,1,4,1)});check(e,3);
   e.apply_batch({upd(0,1,0,2,true)});check(e,3);
@@ -68,7 +69,7 @@ int main(){try{
       one.apply_batch(batch);check(one,k);
       SchedulePolicy policy;policy.reverse_dag_order=true;policy.vertex_ties=TieBreakDirection::Descending;policy.edge_ties=TieBreakDirection::Descending;policy.topological_ties=TieBreakDirection::Descending;
       other.apply_batch(batch,policy);check(other,k);
-      require(compare_state_tables(one.states(),other.states()).equal,"DAG ordering changed DP");
+      require(compare_state_tables(ordered(one.states()),ordered(other.states())).equal,"DAG ordering changed DP");
       grouped.flush();check(grouped.engine(),k);
     }
   }
