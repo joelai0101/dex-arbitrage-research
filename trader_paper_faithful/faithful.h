@@ -54,6 +54,7 @@ struct Metrics {
   std::size_t popped=0, repaired=0, candidate_refreshes=0, maintained=0, deferred=0;
   std::size_t forward_edges=0, backward_edges=0, queue_peak=0;
   std::size_t changed_states=0, unchanged_repairs=0;
+  std::size_t nonimproving_rejected=0;
   std::size_t algorithm1_calls=0, dag_forward_passes=0, dag_backward_passes=0;
   std::size_t eg_changed_arrivals=0, eg_immediate=0, eg_gap_triggers=0, eg_new_triggers=0, eg_no_anchor_triggers=0, eg_deleted_best_triggers=0, eg_eof_flushes=0;
   std::size_t eg_grouped_updates=0, eg_group_max=0;
@@ -222,8 +223,19 @@ public:
     // Complete the unspecified state-level apply with one shared frontier per
     // DAG/direction pass, not one global pass across all decomposed DAGs.
     std::vector<IndexedStates> pending(k_+1);
+    WitnessStates forced;
     auto enqueue=[&](const StateKey& key,StateValue value){
       if(!needed(key)&&!invalid.count(key))return;
+      // Algorithm 1 admits improved labels, not every generated extension.
+      // Invalid witnesses must still be repaired; Algorithm 3 direction seeds
+      // must still expand when their edge label was set in the earlier pass.
+      if(!invalid.count(key)&&!forced.count(key)){
+        auto old=dp_.find(key);
+        if(old!=dp_.end()&&(old->second.weight<value.weight||
+           (old->second.weight==value.weight&&old->second.path<=value.path))){
+          ++metrics.nonimproving_rejected;return;
+        }
+      }
       auto& layer=pending[cardinality(key.colors)];auto it=layer.find(key);
       if(it==layer.end())layer.emplace(key,std::move(value));
       else if(value.weight<it->second.weight||(value.weight==it->second.weight&&value.path<it->second.path))it->second=std::move(value);
@@ -253,7 +265,6 @@ public:
       // retain their indexes and must not cause another propagation wave.
       for(auto key:invalid)enqueue(key,{INFINITY,{}});
     }
-    WitnessStates forced;
     auto drain=[&](int first_direction){
     for(std::size_t level=2;level<=k_;++level){
       metrics.queue_peak=std::max(metrics.queue_peak,pending[level].size());

@@ -48,6 +48,7 @@ int main(int argc,char** argv){try{
  for(std::size_t i=0;i<ell;++i){const Engine& e=mode=="eg"?groups[i]->engine():*engines[i];auto m=e.metrics;
    total.popped+=m.popped;total.repaired+=m.repaired;total.candidate_refreshes+=m.candidate_refreshes;total.maintained+=m.maintained;total.deferred+=m.deferred;
    total.changed_states+=m.changed_states;total.unchanged_repairs+=m.unchanged_repairs;
+   total.nonimproving_rejected+=m.nonimproving_rejected;
    total.algorithm1_calls+=m.algorithm1_calls;total.dag_forward_passes+=m.dag_forward_passes;total.dag_backward_passes+=m.dag_backward_passes;
    total.eg_changed_arrivals+=m.eg_changed_arrivals;total.eg_immediate+=m.eg_immediate;total.eg_gap_triggers+=m.eg_gap_triggers;
    total.eg_new_triggers+=m.eg_new_triggers;total.eg_no_anchor_triggers+=m.eg_no_anchor_triggers;total.eg_deleted_best_triggers+=m.eg_deleted_best_triggers;
@@ -59,12 +60,13 @@ int main(int argc,char** argv){try{
    total.schedule_ms+=m.schedule_ms;total.repair_ms+=m.repair_ms;total.propagation_ms+=m.propagation_ms;total.candidate_ms+=m.candidate_ms;total.classification_ms+=m.classification_ms;
    states+=e.states().size();candidates+=e.ranking().size();links+=e.witness_links();
  }
- std::cout<<std::setprecision(17)<<"{\"method\":\"TRADER-paper-contract-v4\",\"mode\":\""<<mode<<"\",\"k\":"<<k<<",\"ell\":"<<ell<<",\"batch\":"<<batch
+ std::cout<<std::setprecision(17)<<"{\"method\":\"TRADER-paper-contract-v5\",\"mode\":\""<<mode<<"\",\"k\":"<<k<<",\"ell\":"<<ell<<",\"batch\":"<<batch
  <<",\"fixed_batch_size\":"<<(mode=="eg"?"null":std::to_string(batch))<<",\"arrival_batch_size\":1,\"eg_enabled\":"<<(mode=="eg"?"true":"false")
  <<",\"rows\":"<<rows<<",\"queries\":"<<queries<<",\"init_ms\":"<<init<<",\"online_ms\":"<<online<<",\"core_ms\":"<<core<<",\"peak_rss_mib\":"<<peak
  <<",\"states\":"<<states<<",\"candidates\":"<<candidates<<",\"witness_links\":"<<links<<",\"queue_pops\":"<<total.popped<<",\"repaired_states\":"<<total.repaired
  <<",\"candidate_refreshes\":"<<total.candidate_refreshes<<",\"maintenance_batches\":"<<total.maintained<<",\"deferred\":"<<total.deferred
  <<",\"state_finalizations\":"<<total.popped<<",\"changed_states\":"<<total.changed_states<<",\"unchanged_repairs\":"<<total.unchanged_repairs
+ <<",\"nonimproving_rejected\":"<<total.nonimproving_rejected
  <<",\"algorithm1_calls\":"<<total.algorithm1_calls<<",\"dag_forward_passes\":"<<total.dag_forward_passes<<",\"dag_backward_passes\":"<<total.dag_backward_passes
  <<",\"eg_changed_arrivals\":"<<total.eg_changed_arrivals<<",\"eg_immediate\":"<<total.eg_immediate<<",\"eg_gap_triggers\":"<<total.eg_gap_triggers
  <<",\"eg_new_triggers\":"<<total.eg_new_triggers<<",\"eg_no_anchor_triggers\":"<<total.eg_no_anchor_triggers<<",\"eg_deleted_best_triggers\":"<<total.eg_deleted_best_triggers

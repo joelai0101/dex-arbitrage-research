@@ -2,10 +2,35 @@
 
 This is a **new, separate implementation**, not a rename of TRADER-corrected or
 the earlier color-layer batch reconstruction. Its output identifies itself as
-`TRADER-paper-contract-v4`. It implements paper-specified mechanisms
+`TRADER-paper-contract-v5`. It implements paper-specified mechanisms
 and documents the extra rules needed for an executable correct dynamic algorithm.
 It is **not** certified byte-for-byte equivalent to the authors' unpublished code,
 and small-graph validation is **not** a UNI performance or global-colorless guarantee.
+
+## V5 improvement-gated queue admission
+
+Algorithm 1 lines 9-11/15-17 enqueue improved labels. The batch frontier used to
+enqueue dominated extensions and reject them only when draining a layer. V5
+rejects such labels before insertion, while retaining invalid-witness repair and
+forced direction seeds. It keeps the same state domain, candidate ranking, EG
+gap and batch schedule. `nonimproving_rejected` records this change; fewer queue
+entries alone do not establish a measured speedup.
+
+The paper DOES specify candidate maintenance: Section VI stores C1 and a
+min-priority queue of remaining candidates, reads C2 at its head, and refreshes
+affected candidates only. This implementation uses an ordered ranking with
+equivalent minimum/key-update operations and deduplicated DP closing-path
+representatives. The remaining completion concerns dependency indexing and
+state-level replacement details, not absence of a candidate algorithm in the
+paper. Section IV-B also states the weight-change/deletion scope, although
+Algorithm 1's improvement-only pseudocode does not spell out invalidation and
+replacement of a worsened selected path. These are limitations of a literal
+transcription, not evidence that the authors' full implementation is incorrect.
+
+Fixed batching and EG are distinct driver modes. The bounded V5 UNI1 diagnostic
+uses B1, B50 and EG separately on the same 256 arrivals / one coloring; it is NOT
+the full six-mode Table IV experiment. In fixed B50, the final six-row partial
+batch is included. Normal and profile builds are timed serially.
 
 ## V4 paper-first revision (supersedes historical scheduling descriptions)
 

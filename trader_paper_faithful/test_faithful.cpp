@@ -53,7 +53,7 @@ int main(){try{
   Engine shared(diamond,dc,3);
   shared.apply_batch({upd(0,1,2,1),upd(0,2,1,2),upd(1,3,0,3),upd(2,3,0,4)});check(shared,3);
   require(shared.states().at({0,3,7}).weight==1,"diamond join must include both branches before finalization");
-  require(shared.metrics.popped==14&&shared.metrics.changed_states==9,"diamond must use separate forward/backward frontiers without repeated within-pass joins");
+  require(shared.metrics.popped<14&&shared.metrics.changed_states==9&&shared.metrics.nonimproving_rejected>0,"reject nonimproving labels before queue insertion; retain both DAG direction passes");
   require(shared.metrics.dag_forward_passes>0&&shared.metrics.dag_forward_passes==shared.metrics.dag_backward_passes&&shared.metrics.algorithm1_calls==0,"batch must execute separate DAG direction passes");
   DirectedWeightedGraph cancel;ColorMap cc{{0,0},{1,1},{2,2}};
   cancel.set_edge(0,1,1);cancel.set_edge(1,2,1);cancel.set_edge(2,0,1);Engine stable(cancel,cc,3);
