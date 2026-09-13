@@ -34,7 +34,31 @@ using the project Python environment. It compiles both variants and checks:
   insertion of future graph vertices;
 - legal-cycle weight, global/colored oracle and quality for known small cases.
 
-Native execution still uses sequential color trials. Its memory/aggregate timing
-must not be presented as a simultaneous best-of-80 online service. Such an adapter
-and full quality/timing runs are pending. No speed matching or main-table version
-selection is performed by these scripts.
+The native entry point still uses sequential color trials. Its memory/aggregate
+timing must not be presented as a simultaneous best-of-80 online service. The
+separate persistent-service stage below provides that lifecycle. No speed matching
+or main-table version selection is performed by these scripts.
+
+## Persistent service (second stage)
+
+`prepare_service.py` extracts the native initialization, update-loop body and EOF
+maintenance into callable methods, retaining each color's graph/DP/buffer in one
+live object. It leaves the native entry point and DP implementation present.
+`service_driver.cpp` holds all ell objects, selects the minimum maintained weight,
+and materializes the returned path. It does not rerank paths by an offline oracle
+or fix stale reported weights. Native internal output-string work is retained.
+External trace-file output is outside the detection timer.
+
+`validate_service.py --root <workspace> --output <new-directory>` compares 36
+per-color trace/final-color/final-graph cases against the previously validated
+interface, then runs serial full-static-UNI1/prefix-32 EG resource pilots at
+ell=1/4/80. These resource pilots are not complete UNI1 performance results.
+
+`run_uni1_official.py --root <workspace> --service <validated-service-directory>
+--output <new-directory> --mode EG` performs one complete official-core UNI1 run,
+then runs the independent global exact-5 oracle separately. Other supported modes
+are B1/50/100/500/1000. It records source/input/binary provenance and OS process
+peak memory. Full-stream path Relative Error and Regret use the returned path's
+actual current weight; mismatch with a stale printed weight is counted separately.
+Initial/per-arrival/EOF traces remain separate. A complete execution does not
+declare the original core optimal or select the paper's main-table version.
