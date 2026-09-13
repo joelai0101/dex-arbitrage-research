@@ -47,13 +47,14 @@ void check(const Engine& e,int k){
 }
 EdgeUpdate upd(int u,int v,double w,std::size_t seq,bool erase=false){return {static_cast<VertexId>(u),static_cast<VertexId>(v),w,erase,"",seq};}
 int main(){try{
-  // Two improved branches meet in one DP state: finalize the join only once.
+  // Two improved branches meet in one state; coalesce within each DAG pass.
   DirectedWeightedGraph diamond;ColorMap dc{{0,0},{1,1},{2,1},{3,2}};
   diamond.set_edge(0,1,10);diamond.set_edge(0,2,10);diamond.set_edge(1,3,1);diamond.set_edge(2,3,1);diamond.set_edge(3,0,3);
   Engine shared(diamond,dc,3);
   shared.apply_batch({upd(0,1,2,1),upd(0,2,1,2),upd(1,3,0,3),upd(2,3,0,4)});check(shared,3);
   require(shared.states().at({0,3,7}).weight==1,"diamond join must include both branches before finalization");
-  require(shared.metrics.popped==9&&shared.metrics.changed_states==9,"diamond must finalize four edges and five closing paths exactly once");
+  require(shared.metrics.popped==14&&shared.metrics.changed_states==9,"diamond must use separate forward/backward frontiers without repeated within-pass joins");
+  require(shared.metrics.dag_forward_passes>0&&shared.metrics.dag_forward_passes==shared.metrics.dag_backward_passes&&shared.metrics.algorithm1_calls==0,"batch must execute separate DAG direction passes");
   DirectedWeightedGraph cancel;ColorMap cc{{0,0},{1,1},{2,2}};
   cancel.set_edge(0,1,1);cancel.set_edge(1,2,1);cancel.set_edge(2,0,1);Engine stable(cancel,cc,3);
   stable.apply_batch({upd(0,1,2,1),upd(1,2,0,2)});check(stable,3);
@@ -72,6 +73,8 @@ int main(){try{
   e.apply_batch({upd(0,1,4,1)});check(e,3);
   e.apply_batch({upd(0,1,0,2,true)});check(e,3);
   e.apply_batch({upd(0,1,-4,3)});check(e,3);
+  Engine single(g,c,3);single.apply_single(upd(1,2,-5,4));check(single,3);
+  require(single.metrics.algorithm1_calls==1&&single.metrics.dag_forward_passes==0,"single edge must route through Algorithm 1");
   // Equal-weight distinct cycles, repeated edge writes, mutually dependent DAGs.
   std::mt19937 rng(9132026);
   for(int k=2;k<=5;++k)for(int sample=0;sample<16;++sample){
@@ -112,6 +115,7 @@ int main(){try{
   boundary.update(upd(0,1,1,2));
   require(boundary.engine().metrics.maintained==1&&boundary.answer().weight==-6,"gap crossing should maintain and replace best");
   check(boundary.engine(),3);
+  require(boundary.engine().metrics.eg_gap_triggers==1&&boundary.engine().metrics.eg_grouped_updates==2&&boundary.engine().metrics.eg_group_sizes.at(2)==1,"EG gap trigger must flush the whole deferred group");
   std::cout<<"PASS "<<checks<<" checks; full DP, legal witnesses, top-two, EG arrivals, mixed batches and schedule permutations\n";
   return 0;
 }catch(const std::exception& ex){std::cerr<<"FAIL after "<<checks<<" checks: "<<ex.what()<<'\n';return 1;}}

@@ -2,12 +2,45 @@
 
 This is a **new, separate implementation**, not a rename of TRADER-corrected or
 the earlier color-layer batch reconstruction. Its output identifies itself as
-`TRADER-paper-reconstruction-terminal-v3`. It implements paper-specified mechanisms
+`TRADER-paper-contract-v4`. It implements paper-specified mechanisms
 and documents the extra rules needed for an executable correct dynamic algorithm.
 It is **not** certified byte-for-byte equivalent to the authors' unpublished code,
 and small-graph validation is **not** a UNI performance or global-colorless guarantee.
 
-## Why another version
+## V4 paper-first revision (supersedes historical scheduling descriptions)
+
+The user-supplied 14-page IEEE paper is the primary contract. Author Git history
+is secondary evidence; the old corrected version is not an accepted substitute.
+Single-edge/TRADER-1 now explicitly invokes Algorithm 1's min-weight queue with
+forward/backward extensions. Fixed B>1 and adaptive EG call Algorithm 3, executing
+each decomposed DAG's forward pass followed by its backward pass. A per-pass
+color-cardinality frontier supplies the otherwise unspecified state-level apply;
+V3's single frontier across ALL DAGs is no longer used. Repair of increases and
+deletions precedes propagation; it remains a disclosed correctness completion.
+This resolves routing/pass-boundary differences, not the paper's unpublished
+internal apply details. It is not a claim that every implementation choice is now
+literally prescribed or that runtime already agrees with Table IV.
+
+Existing terminal projection is retained with its proof/tests; no new root pruning
+or other performance-driven state reduction is added in this revision. The min-path
+representative ranking still returns true distinct C1/C2, but is not a catalogue of
+every possible cycle; this specialization remains explicit.
+
+`eg_enabled` and `fixed_batch_size` disambiguate the driver: for EG they are true
+and null. The legacy `batch=1` field is only the interface argument, not the EG
+maintenance group size. Reports must use `fixed_batch_size`. Trigger counts,
+changed arrivals, EOF flushes and group-size histogram expose actual maintenance.
+Reason counters form a mutually exclusive partition in order: new edge, missing
+anchor, deletion of a best-cycle edge, then gap crossing. No-op arrivals remain in
+the ms/update denominator but do not contribute to the changed-arrival histogram.
+
+Tests assert Algorithm1 routing for single mode; DAG pass routing for B>1/EG;
+EG immediate+EOF counts equal maintenance batches; group-size sum equals all changed
+arrivals; and independent fixed-color optimal answers. State-finalization/queue
+metrics have different meanings across the priority and layered paths; they are
+not interchangeable measures of redundant work.
+
+## Historical revisions through V3
 
 The old reconstruction at `843cc25` collected DAG-ordered seeds, then used a unified
 color-cardinality worklist. That is an explicit correctness completion rather than
@@ -208,13 +241,45 @@ and EOF flush. `core_ms` excludes input/output. Windows peak working set is meas
 over the complete process and includes initialization; non-Windows `-1` means this
 driver has no OS peak measurement. Do not report it as a numeric memory result.
 
-`TRADER_PROFILE` adds separate schedule, invalidation/repair, propagation, candidate
-and EG-classification timers. They do not nest; their sum is checked against core
-time. Driver/selection/answer costs form the residual. This supports the newly
+`TRADER_PROFILE` adds schedule, invalidation/repair, propagation, candidate
+and EG-classification timers. V4 additionally measures a complete DP-maintenance
+scope, declared before all batch-local containers so their cleanup is included;
+candidate time is subtracted from that scope. The primary disjoint decomposition
+is `dp_total_ms + candidate_ms + classification_ms`, bounded by core time. Within
+DP, schedule/repair/propagation plus `dp_bookkeeping_ms` explain its components.
+Do NOT sum dp_total again with these subordinate timers. Driver/selection/answer
+and I/O costs form the remaining online residual. This supports the newly
 prioritized Breakdown time work, but instrumented timings must not replace formal
 uninstrumented measurements, and overhead needs a matched UNI-scale assessment.
 The witness index can use substantial memory. No full UNI / ell80 feasibility or
 paper-level speed claim is established by this implementation release.
+
+V4 normal UNI1/ell1/256-arrival EG: 203.656341796875 ms/update,
+2883.09765625 MiB, 257/257 correct fixed-color answers. Actual EG counts:
+242 changed arrivals, 196 deferred, 46 gap-triggered immediate flushes and one
+EOF flush; average group 242/47=5.148936, maximum19; 184 forward and 184 backward
+DAG passes. No new-edge triggers. The trace still matches preceding validated
+reconstructions. This does not establish paper-level runtime or global optimality.
+
+The initial V4 profile was 218.914184765625 ms/update but left 9.29% unattributed;
+it is retained as a historical incomplete breakdown, not promoted to Figure11.
+The subsequent complete-DP timer change is profile-only: normal preprocessed
+sources before/after have identical SHA256
+`647ac0ffdcd51b13c8b15f0da2f37522cdec3461a93757827abc75ba8169e83b`.
+PE binaries have different hashes, so this is a source-path equivalence check,
+not a claim of byte-identical executables. Do not replace normal timing with a
+profile run or interpret a single profile/normal difference as stable overhead.
+
+The complete V4 UNI profile finishes with 257/257 correct fixed-color answers,
+identical input/trace and 23 non-time counters plus group histogram matching normal.
+Profile online=55971.6804ms (218.6393765625ms/update); dp_total=55956.2583ms
+(99.97245%), candidate=12.0474ms (0.02152%), classification=0.6296ms (0.00112%),
+online residual=2.7451ms (0.00490%). DP components are schedule16.9376ms,
+repair17503.326399063342ms, propagation33264.20389886283ms and measured scratch/
+bookkeeping5171.790402073828ms. Phase sums and primary/subphase accounting pass.
+This still differs substantially from paper Figure11's path/cycle split; the new
+normal 203.656341796875ms/update remains the detection result. UNI six modes and
+formal ell80 are not automatically released by passing correctness/routing tests.
 
 ## Provenance
 

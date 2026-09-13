@@ -54,7 +54,14 @@ struct Metrics {
   std::size_t popped=0, repaired=0, candidate_refreshes=0, maintained=0, deferred=0;
   std::size_t forward_edges=0, backward_edges=0, queue_peak=0;
   std::size_t changed_states=0, unchanged_repairs=0;
+  std::size_t algorithm1_calls=0, dag_forward_passes=0, dag_backward_passes=0;
+  std::size_t eg_changed_arrivals=0, eg_immediate=0, eg_gap_triggers=0, eg_new_triggers=0, eg_no_anchor_triggers=0, eg_deleted_best_triggers=0, eg_eof_flushes=0;
+  std::size_t eg_grouped_updates=0, eg_group_max=0;
+  std::map<std::size_t,std::size_t> eg_group_sizes;
   double schedule_ms=0, repair_ms=0, propagation_ms=0, candidate_ms=0, classification_ms=0;
+#ifdef TRADER_PROFILE
+  double dp_total_ms=0;
+#endif
 };
 struct Phase {
 #ifdef TRADER_PROFILE
@@ -66,6 +73,18 @@ struct Phase {
   explicit Phase(double&){}
 #endif
 };
+#ifdef TRADER_PROFILE
+// Declared before batch-local containers, so destruction runs after their cleanup.
+// Candidate timing is nested and subtracted, leaving a complete DP-maintenance
+// interval, including scheduling and scratch allocation/deallocation.
+struct DPMaintenancePhase {
+  Metrics& metrics;
+  double candidate_before;
+  std::chrono::steady_clock::time_point start=std::chrono::steady_clock::now();
+  explicit DPMaintenancePhase(Metrics& m):metrics(m),candidate_before(m.candidate_ms){}
+  ~DPMaintenancePhase(){metrics.dp_total_ms+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count()-(metrics.candidate_ms-candidate_before);}
+};
+#endif
 
 // Section IV endpoint/color-set DP. All shorter masks; terminal masks only
 // for existing closing edges. No canonical-root restriction or DELTA DAG.
@@ -108,6 +127,34 @@ class Engine {
       if(changed_path)index(key,value);
     }else {dp_.emplace(key,value);index(key,value);}
     mark(key);return true;
+  }
+  // Algorithm 1: min-weight priority queue with both endpoint extensions.
+  // Repair of invalid increased/deleted witnesses is a separate completion.
+  void propagate_priority(const std::vector<EdgeUpdate>& updates){
+    struct Entry{StateKey key;StateValue value;};
+    struct Later{bool operator()(const Entry&a,const Entry&b)const{
+      return a.value.weight!=b.value.weight?a.value.weight>b.value.weight:b.key<a.key;
+    }};
+    std::priority_queue<Entry,std::vector<Entry>,Later> queue;
+    for(auto u:updates){if(u.erase||bit(u.source)==bit(u.destination))continue;
+      StateKey key{u.source,u.destination,bit(u.source)|bit(u.destination)};if(!needed(key))continue;
+      StateValue value{u.weight,{u.source,u.destination}};offer(key,value);queue.push({key,value});
+    }
+    ++metrics.algorithm1_calls;
+    while(!queue.empty()){
+      metrics.queue_peak=std::max(metrics.queue_peak,queue.size());auto entry=queue.top();queue.pop();++metrics.popped;
+      auto old=dp_.find(entry.key);if(old==dp_.end()||old->second.weight!=entry.value.weight||old->second.path!=entry.value.path)continue;
+      if(cardinality(entry.key.colors)==k_)continue;
+      auto extend=[&](VertexId v,double weight,bool backward){
+        if(entry.key.colors&bit(v))return;
+        StateKey key{backward?v:entry.key.source,backward?entry.key.destination:v,entry.key.colors|bit(v)};if(!needed(key))return;
+        StateValue value{entry.value.weight+weight,entry.value.path};
+        if(backward)value.path.insert(value.path.begin(),v);else value.path.push_back(v);
+        if(offer(key,value)){++metrics.changed_states;queue.push({key,std::move(value)});}
+      };
+      for(auto [v,w]:graph_.outgoing(entry.key.destination))extend(v,w,false);
+      for(auto [v,w]:graph_.incoming(entry.key.source))extend(v,w,true);
+    }
   }
   void remove_rep(const DirectedEdge& key){
     auto it=representatives_.find(key);if(it==representatives_.end())return;
@@ -159,16 +206,21 @@ public:
   double gap()const {if(ranking_.empty())return 0;if(ranking_.size()==1)return INFINITY;auto a=ranking_.begin(),b=std::next(a);return b->first-a->first;}
   const auto& ranking()const{return ranking_;}
   std::size_t witness_links()const{std::size_t n=0;for(auto&[e,s]:witnesses_)n+=s.size();return n;}
-  void apply_batch(const std::vector<EdgeUpdate>& input,const SchedulePolicy& policy={}) {
+  void apply_single(const EdgeUpdate& update){apply_batch({update},{},true);}
+  void apply_batch(const std::vector<EdgeUpdate>& input,const SchedulePolicy& policy={},bool incremental=false) {
     if(input.empty())return;
+#ifdef TRADER_PROFILE
+    DPMaintenancePhase dp_scope(metrics);
+#endif
     Schedule schedule;
-    {Phase timer(metrics.schedule_ms);schedule=build_schedule(input,graph_.edges(),DependencyGraphMode::VertexInduced,policy);}
+    {Phase timer(metrics.schedule_ms);
+      if(incremental)schedule.coalesced_updates=coalesce_latest(input);
+      else schedule=build_schedule(input,graph_.edges(),DependencyGraphMode::VertexInduced,policy);
+    }
     WitnessStates invalid;
     std::map<DirectedEdge,EdgeUpdate> effective;
-    // Explicit completion of Algorithm 3's undefined apply(): collect all
-    // DAG frontiers, then finalize states in the actual color-set dependency
-    // DAG. Every extension adds one color, including with negative weights.
-    // This is NOT a claim that the paper publishes this internal worklist.
+    // Complete the unspecified state-level apply with one shared frontier per
+    // DAG/direction pass, not one global pass across all decomposed DAGs.
     std::vector<IndexedStates> pending(k_+1);
     auto enqueue=[&](const StateKey& key,StateValue value){
       if(!needed(key)&&!invalid.count(key))return;
@@ -201,21 +253,8 @@ public:
       // retain their indexes and must not cause another propagation wave.
       for(auto key:invalid)enqueue(key,{INFINITY,{}});
     }
-    {
-      Phase timer(metrics.propagation_ms);
-      auto apply=[&](std::size_t id,int direction){
-        DirectedEdge e=schedule.dependency_edges.at(id);
-        if(direction>0)++metrics.forward_edges;else ++metrics.backward_edges;
-        auto update=effective.find(e);if(update==effective.end()||update->second.erase||bit(e.source)==bit(e.destination))return;
-        StateKey key{e.source,e.destination,bit(e.source)|bit(e.destination)};
-        StateValue value{update->second.weight,{e.source,e.destination}};
-        enqueue(key,std::move(value));
-      };
-      for(const Dag& dag:schedule.dags){
-        for(auto id:ready_edges(dag,schedule.dependency_edges,false,policy.topological_ties))apply(id,1);
-        for(auto id:ready_edges(dag,schedule.dependency_edges,true,policy.topological_ties))apply(id,-1);
-      }
-    }
+    WitnessStates forced;
+    auto drain=[&](int first_direction){
     for(std::size_t level=2;level<=k_;++level){
       metrics.queue_peak=std::max(metrics.queue_peak,pending[level].size());
       for(auto& [key,candidate]:pending[level]){
@@ -235,18 +274,21 @@ public:
         }
         Phase timer(metrics.propagation_ms);
         auto old=dp_.find(key);
-        if(best&&old!=dp_.end()&&old->second.weight==best->weight&&old->second.path==best->path){
-          if(repair)++metrics.unchanged_repairs;continue;
+        const bool same=best&&old!=dp_.end()&&old->second.weight==best->weight&&old->second.path==best->path;
+        const bool worse=!repair&&old!=dp_.end()&&(old->second.weight<best->weight||(old->second.weight==best->weight&&old->second.path<best->path));
+        if(same||worse){
+          if(repair&&same)++metrics.unchanged_repairs;
+          if(!forced.count(key))continue;
+          best=old->second;
         }
-        if(!repair&&old!=dp_.end()&&(old->second.weight<best->weight||(old->second.weight==best->weight&&old->second.path<best->path)))continue;
         if(!best){erase(key);++metrics.changed_states;continue;}
         // Repair may raise a label. Do not erase/reinsert an unchanged witness.
-        if(repair&&old!=dp_.end()){
+        if(!same&&!worse&&repair&&old!=dp_.end()){
           bool changed_path=old->second.path!=best->path;
           if(changed_path)unindex(key,old->second);
           old->second=*best;if(changed_path)index(key,*best);mark(key);
-        }else offer(key,*best);
-        ++metrics.changed_states;
+        }else if(!same&&!worse)offer(key,*best);
+        if(!same&&!worse)++metrics.changed_states;
         if(level==k_)continue;
         auto extend=[&](VertexId v,double w,bool backward){
           if(key.colors&bit(v))return;
@@ -255,10 +297,32 @@ public:
           if(backward)value.path.insert(value.path.begin(),v);else value.path.push_back(v);
           enqueue(next,std::move(value));
         };
-        for(auto [v,w]:graph_.outgoing(key.destination))extend(v,w,false);
-        for(auto [v,w]:graph_.incoming(key.source))extend(v,w,true);
+        if(level>2||first_direction>=0)for(auto [v,w]:graph_.outgoing(key.destination))extend(v,w,false);
+        if(level>2||first_direction<=0)for(auto [v,w]:graph_.incoming(key.source))extend(v,w,true);
       }
       pending[level].clear();
+    }
+    };
+    drain(0);invalid.clear();
+    if(incremental){
+      Phase timer(metrics.propagation_ms);std::vector<EdgeUpdate> seeds;
+      for(auto [edge,u]:effective)seeds.push_back(u);
+      if(!seeds.empty())propagate_priority(seeds);
+    }else for(const Dag& dag:schedule.dags){
+      for(int direction:{1,-1}){
+        {
+          Phase timer(metrics.propagation_ms);forced.clear();
+          if(direction>0)++metrics.dag_forward_passes;else ++metrics.dag_backward_passes;
+          for(auto id:ready_edges(dag,schedule.dependency_edges,direction<0,policy.topological_ties)){
+            auto e=schedule.dependency_edges.at(id);
+            if(direction>0)++metrics.forward_edges;else ++metrics.backward_edges;
+            auto update=effective.find(e);if(update==effective.end()||update->second.erase||bit(e.source)==bit(e.destination))continue;
+            StateKey key{e.source,e.destination,bit(e.source)|bit(e.destination)};
+            forced.insert(key);enqueue(key,{update->second.weight,{e.source,e.destination}});
+          }
+        }
+        drain(direction);
+      }
     }
     {
       Phase timer(metrics.candidate_ms);
@@ -291,16 +355,30 @@ public:
       if(!u.erase&&!std::isfinite(u.weight))throw std::invalid_argument("nonfinite weight");
       auto old=live_.edge_weight(u.source,u.destination);
       if((u.erase&&!old)||(!u.erase&&old&&*old==u.weight))return;
+      ++engine_.metrics.eg_changed_arrivals;
       bool on=false;for(std::size_t i=1;i<anchor_.cycle.size();++i)on|=anchor_.cycle[i-1]==u.source&&anchor_.cycle[i]==u.destination;
       const bool same=engine_.colors().at(u.source)==engine_.colors().at(u.destination);
       if(!same&&old&&!u.erase)adverse_+=on?std::max(0.0,u.weight-*old):std::max(0.0,*old-u.weight);
       immediate=!same&&(!old||!anchor_.exists||(u.erase&&on)||adverse_>gap_);
+      if(immediate){
+        ++engine_.metrics.eg_immediate;
+        if(!old)++engine_.metrics.eg_new_triggers;
+        else if(!anchor_.exists)++engine_.metrics.eg_no_anchor_triggers;
+        else if(u.erase&&on)++engine_.metrics.eg_deleted_best_triggers;
+        else ++engine_.metrics.eg_gap_triggers;
+      }
       pending_.push_back(u);if(u.erase)live_.remove_edge(u.source,u.destination);else live_.set_edge(u.source,u.destination,u.weight);
       if(!immediate)++engine_.metrics.deferred;
     }
-    if(immediate)flush();
+    if(immediate)flush(false);
   }
-  void flush(){if(pending_.empty())return;engine_.apply_batch(pending_);pending_.clear();anchor_=engine_.best();gap_=engine_.gap();adverse_=0;}
+  void flush(bool eof=true){if(pending_.empty())return;
+    if(eof)++engine_.metrics.eg_eof_flushes;
+    engine_.metrics.eg_grouped_updates+=pending_.size();
+    engine_.metrics.eg_group_max=std::max(engine_.metrics.eg_group_max,pending_.size());
+    ++engine_.metrics.eg_group_sizes[pending_.size()];
+    engine_.apply_batch(pending_);pending_.clear();anchor_=engine_.best();gap_=engine_.gap();adverse_=0;
+  }
   CycleAnswer answer()const {auto a=anchor_;if(!a.exists)return a;a.weight=0;
     for(std::size_t i=1;i<a.cycle.size();++i){auto w=live_.edge_weight(a.cycle[i-1],a.cycle[i]);if(!w)throw std::logic_error("invalid deferred witness");a.weight+=*w;}return a;}
   const DirectedWeightedGraph& live()const{return live_;}

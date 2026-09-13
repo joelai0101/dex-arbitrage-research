@@ -109,9 +109,24 @@ def main():
                         w = sum(snapshots[row][e] for e in zip(p, p[1:]))
                         assert abs(float(weight) - expected[row]) < 1e-9 and abs(w - float(weight)) < 1e-9
                 assert metrics['rows'] == 60 and metrics['queries'] == len(expected_rows) - 1
+                assert metrics['eg_enabled'] == (mode == 'eg')
+                assert metrics['fixed_batch_size'] == (None if mode == 'eg' else b)
+                if mode == 'eg':
+                    assert metrics['algorithm1_calls'] == 0
+                    assert metrics['eg_immediate'] + metrics['eg_eof_flushes'] == metrics['maintenance_batches']
+                    assert metrics['eg_immediate'] == sum(metrics[x] for x in ['eg_gap_triggers','eg_new_triggers','eg_no_anchor_triggers','eg_deleted_best_triggers'])
+                    assert metrics['eg_changed_arrivals'] == metrics['eg_grouped_updates'] == metrics['eg_immediate'] + metrics['deferred']
+                    assert sum(int(size)*count for size,count in metrics['eg_group_size_histogram'].items()) == metrics['eg_grouped_updates']
+                elif mode == 'single':
+                    assert metrics['algorithm1_calls'] > 0 and metrics['dag_forward_passes'] == 0
+                else:
+                    assert metrics['algorithm1_calls'] == 0 and metrics['dag_forward_passes'] > 0
+                assert metrics['dag_forward_passes'] == metrics['dag_backward_passes']
                 if variant == 'profile':
                     parts = sum(metrics[key] for key in ['schedule_ms', 'repair_ms', 'propagation_ms', 'candidate_ms', 'classification_ms'])
                     assert parts <= metrics['core_ms'] + .01
+                    assert metrics['dp_bookkeeping_ms'] >= -.01
+                    assert metrics['dp_total_ms'] + metrics['candidate_ms'] + metrics['classification_ms'] <= metrics['core_ms'] + .01
                 traces.append(trace.read_bytes())
                 smoke.append({'k': k, 'ell': 8, 'mode': mode, 'variant': variant, 'answers': len(actual), 'metrics': metrics})
             assert traces[0] == traces[1], 'profiling changed answers'
