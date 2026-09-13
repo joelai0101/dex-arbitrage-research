@@ -139,4 +139,37 @@ and residual overhead. Nested candidate time is subtracted from its parent DP
 scope, and initialization/trace IO are outside profiling. The reported profile
 versus control ratio includes run variability; it is not a calibrated correction.
 The first UNI1 pair has a 1.3343 ratio, so its phase shares remain exploratory,
-not an overhead-free final breakdown. TRADER/GraphS breakdown is still pending.
+not an overhead-free final breakdown. See the additional method diagnostics below.
+
+`run_trader_breakdown.py --root <workspace> --output <new-directory>` adds
+exclusive scopes to a copy of the official persistent service. It compares
+k3/k5 x B1/B1000/EG control/profile traces with existing service traces, then
+executes one complete UNI1 official-EG pair. Recursive DFS calls have no timers;
+DP-root/update work, closing-state rescans, maintained-best updates and answer
+formatting/reweighting are charged in distinct nested scopes. It deliberately
+retains all existing official answer defects. Candidate time here is not a
+candidate-tree index like DELTA. Both full traces must match the completed
+official run before a summary is accepted.
+
+The first completed UNI1 official-EG pair matches both full traces exactly.
+DP maintenance is 72.61% and closing-state rescan/maintained-best updates 23.92%
+of the profiled run. Profile/control is 0.99210, a single-run observation, not
+evidence that instrumentation accelerates the algorithm or has zero overhead.
+
+`run_graphs_breakdown.py --root <workspace> --output <new-directory>` uses the
+same completed common adapter and unchanged HP-index class files. Runtime flag
+`common.breakdown` controls coarse per-update scopes; no per-candidate timers
+are added. Maintenance includes HP-index insertion/path queries and canonical
+path/dirty-set collection; candidate time is the whole dirty-ranking refresh
+loop. It checks the 1002-arrival fixture for both modes before running a serial
+UNI1 control/profile pair (each capped at 3600 seconds). Exact full trace matches
+and backend hashes are required. `active.json` and `completed_modes.json` allow
+later heartbeats to monitor without restarting. The Java service remains live
+until the supervisor acknowledges OS-peak sampling. This is a local adapted
+GraphS diagnostic, not official-author code or a new formal average.
+
+Do not overlap any of these diagnostic timing pairs with other benchmarks,
+compilation, oracle execution, profiling or slide rendering. A single pair's
+ratio includes run/JVM variability; it is not a statistically calibrated pure
+instrumentation overhead estimate. Initialization and external trace IO are
+excluded, and phase sums include the outer timing-boundary residual as Other.
