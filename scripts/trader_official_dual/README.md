@@ -81,3 +81,22 @@ checks in both variants and all six modes. Once passed,
 with process state/checkpoints and no automatic failed-run retry. It reuses the
 completed EG run's same-input oracle and never reruns EG. Do not compile, profile,
 run another oracle, or benchmark another method while this queue is measuring.
+
+## GraphS common-input service
+
+`prepare_graphs_common.py` changes only the hash-pinned weighted adapter's vertex
+arrival handling: reserve IDs, initialize observed vertices in ascending order,
+and insert new endpoints into the public forward/reverse graphs on arrival.
+The existing third-party HP-index backend class files remain hash-identical.
+This is a locally adapted third-party implementation, not official GraphS.
+
+`run_graphs_uni1.py` compiles that adapter and `GraphSCommonDriver.java`, checks
+thresholds 1/3/40 against the existing 1002-update oracle fixture, then measures
+one complete UNI1 run at threshold 40 with a 16 GiB Java heap limit. GraphS is
+uncolored exact-5: ell and colorful-path checks are not applicable. The common
+timer includes update parsing, maintenance, winner access and answer copying;
+initialization and external trace output are excluded. OS peak memory is sampled
+before the resident service is released. Full quality uses the same hash-checked
+global oracle as DELTA/TRADER, after timing. Run this stage only when the official
+fixed queue is complete; keep compilation, profiling and other measurements out
+of its timing interval. A passing small fixture is not a completed full result.

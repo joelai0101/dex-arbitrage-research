@@ -18,7 +18,7 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def quality(case, trace_path, oracle_path, color_path, publication_rows=None, final_eof=False):
+def quality(case, trace_path, oracle_path, color_path, publication_rows=None, final_eof=False, check_colors=True):
     live={(int(u),int(v)):float(w) for u,v,w in
           (line.split() for line in (case/'graph.txt').read_text().splitlines())}
     updates=[line.split() for line in (case/'updates.txt').read_text().splitlines()]
@@ -48,7 +48,7 @@ def quality(case, trace_path, oracle_path, color_path, publication_rows=None, fi
             counts['invalid_path']+=1
         else:
             actual=math.fsum(live[u,v] for u,v in zip(path,path[1:]))
-            if len({colors[answer['coloring']][str(v)] for v in path[:-1]})!=5: counts['color_violation']+=1
+            if check_colors and len({colors[answer['coloring']][str(v)] for v in path[:-1]})!=5: counts['color_violation']+=1
         reported=float(answer['weight'])
         ref=float(refs[row]['weight']) if refs[row]['weight']!='none' else None
         if actual is not None and (not math.isfinite(reported) or abs(actual-reported)>1e-10): counts['reported_weight_mismatch']+=1
@@ -63,7 +63,8 @@ def quality(case, trace_path, oracle_path, color_path, publication_rows=None, fi
         details.append(dict(row=row,reported_weight=reported if math.isfinite(reported) else None,
                             actual_weight=actual,oracle_weight=ref))
     complete=scored>0 and not any(counts[k] for k in ['missing','invalid_path','below_oracle','no_finite_reference'])
-    return dict(updates=len(updates),scored_snapshots=scored,counts=counts,path_quality_complete=complete,
+    if not check_colors: counts['color_violation']=None
+    return dict(updates=len(updates),scored_snapshots=scored,counts=counts,path_quality_complete=complete,color_check_applicable=check_colors,
                 path_relative_error_pct=100*statistics.fmean(relative) if complete and relative else None,
                 path_mean_regret=statistics.fmean(gaps) if complete else None,
                 path_cumulative_regret=math.fsum(gaps) if complete else None,
