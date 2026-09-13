@@ -100,3 +100,43 @@ before the resident service is released. Full quality uses the same hash-checked
 global oracle as DELTA/TRADER, after timing. Run this stage only when the official
 fixed queue is complete; keep compilation, profiling and other measurements out
 of its timing interval. A passing small fixture is not a completed full result.
+
+## Minimal patch stage 1 and unresolved witnesses
+
+`prepare_source.py --variant minpatch` adds three localized changes on the same
+pinned source: preserve incoming EG weight, include/restore predecessor color in
+backward DFS, and route destination-zero updates through normal graph/DP update.
+It is still diagnostic (`gap_repaired=false`, `production_accepted=false`). The
+official and oldnew generated sources remain unchanged.
+
+Run `validate_minpatch.py --root <workspace> --output <new-directory>` only when
+no formal timing is active. It compiles one audit binary, tests six modes on the
+finite gap witness, checks destination-zero graph mutation for same/different
+colors, and compares a fixed-seed UNI1 prefix of 769 arrivals. The latter clears
+186 non-colorful held answers relative to oldnew in this one-color prefix; it is
+not a full 80-color correctness proof. No diagnostic time enters the main table.
+
+`diagnose_minpatch_gaps.py --root <workspace> --binary <minpatch_audit.exe>
+--output <new-directory>` reuses that binary. A best-cycle weight increase still
+returns weight -3 when the colored/global optimum is -5, and adaptive EG still
+defers the known -10 to -16 improvement until EOF. A separate exact enumeration
+shows two colorful cycles (-10, -9) sharing one closing DP key: scanning only the
+stored minimum at each closing key cannot recover the true second cycle. This
+does not authorize replacing the official DP with an independent reconstruction.
+
+## DELTA exclusive breakdown diagnostic
+
+`run_delta_breakdown.py --root <workspace> --output <new-directory>` generates
+instrumented copies using `prepare_delta_breakdown.py`, compiles the same source
+with profiling disabled/enabled, checks B1/B1000 small-fixture traces, then runs
+one UNI1 B1 control/profile pair. Traces must exactly match the completed normal
+run. Original core files are hash-checked and never modified. No formal result
+is overwritten and neither diagnostic joins the formal average.
+
+Exclusive categories are classification/coalescing/graph-weight installation,
+DP/dependency maintenance, candidate-tree maintenance, answer retrieval/copy,
+and residual overhead. Nested candidate time is subtracted from its parent DP
+scope, and initialization/trace IO are outside profiling. The reported profile
+versus control ratio includes run variability; it is not a calibrated correction.
+The first UNI1 pair has a 1.3343 ratio, so its phase shares remain exploratory,
+not an overhead-free final breakdown. TRADER/GraphS breakdown is still pending.

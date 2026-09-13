@@ -1,7 +1,7 @@
 """Reproducible interface patch over pinned, locally supplied TRADER sources.
 
-No upstream source is vendored. The oldnew variant is an isolated diagnostic
-patch, NOT a completed/corrected Edge Grouping implementation.
+No upstream source is vendored. The oldnew and minpatch variants are diagnostic
+stages, NOT completed/corrected Edge Grouping implementations.
 """
 import argparse
 import difflib
@@ -116,9 +116,22 @@ def transform(original, variant):
                        '    for(auto line: batch_lines) {\n        if (common_decode(line).noop) continue;')
     cpp = replace_once(cpp, '                        for (const auto& batch_line : batch_lines) {',
                        '                        for (const auto& batch_line : batch_lines) {\n                            if (common_decode(batch_line).noop) continue;')
-    if variant == 'oldnew':
+    if variant in ('oldnew', 'minpatch'):
         cpp = replace_once(cpp, '                if(!graph.get_edge_weight(src_node, dst_node, weight)) {',
                            '                double lookup_old_weight = 0.0;\n                if(!graph.get_edge_weight(src_node, dst_node, lookup_old_weight)) {')
+    if variant == 'minpatch':
+        # Scope mask edits to backward DFS, not the forward search.
+        begin = cpp.index('void KCycleColorCoding::backword_dfs(')
+        end = cpp.index('void KCycleColorCoding::get_all_back_dfs_nodes(', begin)
+        backward = cpp[begin:end]
+        backward = replace_once(backward, '        if(pre < dst_node) {',
+                                '        if(pre < dst_node) {\n            color_set |= pre_color;')
+        backward = replace_once(backward, '                color_set &= ~pre_color;\n            }',
+                                '            }\n            color_set &= ~pre_color;')
+        cpp = cpp[:begin] + backward + cpp[end:]
+        begin = cpp.index('                if(dst_node == 0){')
+        end = cpp.index('\n            }\n        } else {', begin)
+        cpp = cpp[:begin] + '                update_edge_weight(src_node, dst_node, weight, trial_best_weight, trial_best_cycle);' + cpp[end:]
     return cpp
 
 
@@ -140,7 +153,9 @@ def prepare(source, output, variant):
         'generated_sha256': {name: hashlib.sha256((output/name).read_bytes()).hexdigest() for name in HASHES},
         'common_interface': ['strict finite/N input', 'future colors assigned in arrival order',
                              'compile-time read-only answer/color/final-graph observer'],
-        'core_patch': [] if variant == 'official' else ['preserve incoming EG weight across old-weight lookup'],
+        'core_patch': ([] if variant == 'official' else ['preserve incoming EG weight across old-weight lookup']) +
+                      (['include predecessor color in backward DFS and restore for every sibling',
+                        'use normal graph/DP update for destination zero'] if variant == 'minpatch' else []),
         'gap_repaired': False, 'production_accepted': False,
         'execution_model': 'native sequential trials; not a simultaneous best-of-colors service',
     }, indent=2), encoding='utf-8')
@@ -150,7 +165,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--variant', choices=['official', 'oldnew'], required=True)
+    parser.add_argument('--variant', choices=['official', 'oldnew', 'minpatch'], required=True)
     args = parser.parse_args()
     prepare(args.source, args.output, args.variant)
 

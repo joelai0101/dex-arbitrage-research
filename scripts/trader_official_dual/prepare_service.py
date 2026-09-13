@@ -101,6 +101,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
-    parser.add_argument('--variant', choices=['official', 'oldnew'], required=True)
+    parser.add_argument('--variant', choices=['official', 'oldnew', 'minpatch'], required=True)
     args = parser.parse_args()
     prepare_service(args.source, args.output, args.variant)
