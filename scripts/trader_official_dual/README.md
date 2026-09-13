@@ -62,3 +62,22 @@ peak memory. Full-stream path Relative Error and Regret use the returned path's
 actual current weight; mismatch with a stale printed weight is counted separately.
 Initial/per-arrival/EOF traces remain separate. A complete execution does not
 declare the original core optimal or select the paper's main-table version.
+
+## Paired DELTA and complete batch boundaries
+
+`run_delta_uni1.py` copies hash-pinned local DeltaEngine sources without modifying
+their core, compiles `delta_service_driver.cpp`, and validates a 1002-arrival case
+at B=1/50/100/500/1000. The fixture includes interior boundaries, repeated edges,
+increases/decreases, ties, N rows, a new minimum-ID root and an EOF remainder.
+Only initially observed roots are initialized; a future root is materialized on
+first arrival using the frozen shared color map. It then runs five complete UNI1
+single runs, recording both per-arrival available-answer and publication-point
+quality. The latter includes EOF's partial batch; it is not substituted into the
+per-arrival trace. The independent same-input oracle is reused after hash checks.
+
+`validate_trader_boundaries.py` uses that fixture for native/persistent fidelity
+checks in both variants and all six modes. Once passed,
+`run_official_fixed_queue.py` executes the five full official fixed modes serially,
+with process state/checkpoints and no automatic failed-run retry. It reuses the
+completed EG run's same-input oracle and never reruns EG. Do not compile, profile,
+run another oracle, or benchmark another method while this queue is measuring.

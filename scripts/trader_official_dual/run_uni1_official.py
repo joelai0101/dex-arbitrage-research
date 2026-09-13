@@ -7,6 +7,7 @@ import json
 import math
 import os
 from pathlib import Path
+import shutil
 import statistics
 import subprocess
 
@@ -17,7 +18,7 @@ def sha(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def quality(case, trace_path, oracle_path, color_path):
+def quality(case, trace_path, oracle_path, color_path, publication_rows=None, final_eof=False):
     live={(int(u),int(v)):float(w) for u,v,w in
           (line.split() for line in (case/'graph.txt').read_text().splitlines())}
     updates=[line.split() for line in (case/'updates.txt').read_text().splitlines()]
@@ -26,13 +27,20 @@ def quality(case, trace_path, oracle_path, color_path):
     with oracle_path.open() as f: refs=list(csv.DictReader(f,delimiter='\t'))
     arrivals=[a for a in trace if a['phase']=='arrival']
     assert len(arrivals)==len(updates) and len(refs)==len(updates)+1
+    if final_eof:
+        eof=[a for a in trace if a['phase']=='eof']
+        assert len(eof)==1 and int(eof[0]['row'])==len(updates)
+        arrivals[-1]=eof[0]
     counts=dict(missing=0,invalid_path=0,reported_weight_mismatch=0,color_violation=0,
                 below_oracle=0,no_finite_reference=0,near_zero_reference=0,optimal=0)
     gaps,relative,details=[],[],[]
+    scored=0
     for row,(update,answer) in enumerate(zip(updates,arrivals),1):
         assert int(answer['row'])==row and int(refs[row]['row'])==row
         u,v,w=update
         if w!='N': live[int(u),int(v)]=float(w)
+        if publication_rows is not None and row not in publication_rows: continue
+        scored+=1
         path=[int(v) for v in answer['path'].split()]
         actual=None
         if not path: counts['missing']+=1
@@ -54,12 +62,12 @@ def quality(case, trace_path, oracle_path, color_path):
             else: counts['near_zero_reference']+=1
         details.append(dict(row=row,reported_weight=reported if math.isfinite(reported) else None,
                             actual_weight=actual,oracle_weight=ref))
-    complete=not any(counts[k] for k in ['missing','invalid_path','below_oracle','no_finite_reference'])
-    return dict(updates=len(updates),counts=counts,path_quality_complete=complete,
+    complete=scored>0 and not any(counts[k] for k in ['missing','invalid_path','below_oracle','no_finite_reference'])
+    return dict(updates=len(updates),scored_snapshots=scored,counts=counts,path_quality_complete=complete,
                 path_relative_error_pct=100*statistics.fmean(relative) if complete and relative else None,
                 path_mean_regret=statistics.fmean(gaps) if complete else None,
                 path_cumulative_regret=math.fsum(gaps) if complete else None,
-                optimal_hit_pct=100*counts['optimal']/len(updates),
+                optimal_hit_pct=100*counts['optimal']/scored if scored else None,
                 reference='independent global exact-5 oracle on the same input',
                 quality_basis='Actual weight of the returned legal path, not a possibly stale reported weight',
                 reported_weight_correct=counts['reported_weight_mismatch']==0,
@@ -72,6 +80,7 @@ def main():
     parser.add_argument('--service',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
     parser.add_argument('--mode',choices=[m[0] for m in MODES],required=True)
+    parser.add_argument('--reuse-oracle-from',type=Path)
     args=parser.parse_args()
     root,service,out=args.root.resolve(),args.service.resolve(),args.output.resolve()
     out.mkdir(parents=True,exist_ok=False)
@@ -122,10 +131,28 @@ def main():
     oracle=base/'alignment_exact5_20260909/exact5.exe'
     manifest['oracle_sha256']=sha(oracle)
     save(out/'manifest.json',manifest)
-    run([oracle,case,out/'oracle.tsv'],'offline_oracle',360)
+    if args.reuse_oracle_from:
+        reference=args.reuse_oracle_from.resolve()
+        previous=json.loads((reference/'manifest.json').read_text())
+        status=json.loads((reference/'active.json').read_text())
+        assert status['status']=='completed'
+        for p in [case/'graph.txt',case/'updates.txt']:
+            assert previous['files'][str(p)]==sha(p)
+        shutil.copy2(reference/'oracle.tsv',out/'oracle.tsv')
+        manifest['oracle_reused_from']=str(reference/'oracle.tsv')
+    else:
+        run([oracle,case,out/'oracle.tsv'],'offline_oracle',360)
+    manifest['oracle_trace_sha256']=sha(out/'oracle.tsv')
+    save(out/'manifest.json',manifest)
     q=quality(case,out/'trace.tsv',out/'oracle.tsv',colors)
     save(out/'quality_details.json',q.pop('details'))
-    save(out/'quality_summary.json',q)
+    if eg:
+        save(out/'quality_summary.json',q)
+    else:
+        published=quality(case,out/'trace.tsv',out/'oracle.tsv',colors,
+                          publication_rows=set(range(batch,7629,batch))|{7628},final_eof=True)
+        published.pop('details')
+        save(out/'quality_summary.json',dict(per_arrival=q,at_publication=published))
     save(out/'active.json',dict(status='completed',mode=mode,supervisor_pid=os.getpid(),
                                result='full_single_run_with_path_quality',main_table_selection_pending=True))
     print(json.dumps(dict(timing=result,quality=q),indent=2),flush=True)
