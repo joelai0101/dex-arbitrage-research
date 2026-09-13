@@ -53,6 +53,7 @@ inline std::vector<std::size_t> ready_edges(const Dag& dag,const std::vector<Dir
 struct Metrics {
   std::size_t popped=0, repaired=0, candidate_refreshes=0, maintained=0, deferred=0;
   std::size_t forward_edges=0, backward_edges=0, queue_peak=0;
+  std::size_t changed_states=0, unchanged_repairs=0;
   double schedule_ms=0, repair_ms=0, propagation_ms=0, candidate_ms=0, classification_ms=0;
 };
 struct Phase {
@@ -66,13 +67,9 @@ struct Phase {
 #endif
 };
 
-// Section IV all-pairs/color-set DP. No canonical-root restriction or DELTA DAG.
+// Section IV endpoint/color-set DP. All shorter masks; terminal masks only
+// for existing closing edges. No canonical-root restriction or DELTA DAG.
 class Engine {
-  struct Entry {StateKey key;StateValue value;int direction=0;};
-  struct Later {bool operator()(const Entry&a,const Entry&b) const {
-    if(a.value.weight!=b.value.weight)return a.value.weight>b.value.weight;
-    return b.key<a.key;
-  }};
   DirectedWeightedGraph graph_;
   ColorMap colors_;
   std::uint32_t k_;
@@ -87,6 +84,7 @@ class Engine {
   std::map<Cycle,double> weights_;
   std::set<std::pair<double,Cycle>> ranking_;
   ColorMask bit(VertexId v) const {return ColorMask{1}<<colors_.at(v);}
+  bool needed(const StateKey& key)const{return key.colors!=full_||graph_.has_edge(key.destination,key.source);}
   void unindex(const StateKey& key,const StateValue& v) {
     for(std::size_t i=1;i<v.path.size();++i){DirectedEdge e{v.path[i-1],v.path[i]};auto it=witnesses_.find(e);
       if(it!=witnesses_.end()){it->second.erase(key);if(it->second.empty())witnesses_.erase(it);}}
@@ -111,28 +109,6 @@ class Engine {
     }else {dp_.emplace(key,value);index(key,value);}
     mark(key);return true;
   }
-  // Algorithm 1: weight-ordered label-correcting queue, NOT Dijkstra.
-  // Negative edges are valid; improved labels may be requeued. Colors grow.
-  void propagate(std::vector<Entry> seeds) {
-    std::priority_queue<Entry,std::vector<Entry>,Later> pending;
-    for(auto& e:seeds)pending.push(std::move(e));
-    while(!pending.empty()){
-      metrics.queue_peak=std::max(metrics.queue_peak,pending.size());
-      Entry e=pending.top();pending.pop();++metrics.popped;
-      auto it=dp_.find(e.key);
-      if(it==dp_.end()||it->second.weight!=e.value.weight||it->second.path!=e.value.path)continue;
-      if(cardinality(e.key.colors)>=k_)continue;
-      auto extend=[&](VertexId v,double w,bool backward){
-        if(e.key.colors&bit(v))return;
-        StateKey key{backward?v:e.key.source,backward?e.key.destination:v,e.key.colors|bit(v)};
-        StateValue value{e.value.weight+w,e.value.path};
-        if(backward)value.path.insert(value.path.begin(),v);else value.path.push_back(v);
-        if(offer(key,value))pending.push({key,std::move(value),0});
-      };
-      if(e.direction>=0)for(auto [v,w]:graph_.outgoing(e.key.destination))extend(v,w,false);
-      if(e.direction<=0)for(auto [v,w]:graph_.incoming(e.key.source))extend(v,w,true);
-    }
-  }
   void remove_rep(const DirectedEdge& key){
     auto it=representatives_.find(key);if(it==representatives_.end())return;
     const Cycle p=it->second;representatives_.erase(it);
@@ -154,13 +130,25 @@ public:
     full_=(ColorMask{1}<<k)-1;
     for(auto [v,c]:colors_){if(c>=k)throw std::invalid_argument("invalid color");graph_.add_vertex(v);}
     for(auto e:graph_.edges())if(e.source==e.destination)throw std::invalid_argument("self loop");
-    auto initial=build_static_dp(graph_,colors_,k_);
-    dp_.reserve(initial.size());
-    // Consume ordered nodes to avoid retaining a second complete table.
-    while(!initial.empty()){
-      auto node=initial.extract(initial.begin());
-      auto inserted=dp_.emplace(node.key(),std::move(node.mapped()));
-      index(inserted.first->first,inserted.first->second);
+    // Same forward recurrence as the independent reference, without building
+    // terminal paths that cannot close and can never serve as a predecessor.
+    IndexedStates layer;
+    for(auto v:graph_.vertices())layer.emplace(StateKey{v,v,bit(v)},StateValue{0,{v}});
+    for(std::size_t length=1;length<=k_;++length){
+      IndexedStates next;
+      if(length<k_)for(auto& [key,value]:layer)for(auto [v,w]:graph_.outgoing(key.destination)){
+        if(key.colors&bit(v))continue;
+        StateKey successor{key.source,v,key.colors|bit(v)};if(!needed(successor))continue;
+        StateValue candidate{value.weight+w,value.path};candidate.path.push_back(v);
+        auto old=next.find(successor);
+        if(old==next.end())next.emplace(successor,std::move(candidate));
+        else if(candidate.weight<old->second.weight||(candidate.weight==old->second.weight&&candidate.path<old->second.path))old->second=std::move(candidate);
+      }
+      while(!layer.empty()){
+        auto node=layer.extract(layer.begin());auto inserted=dp_.insert(std::move(node));
+        index(inserted.position->first,inserted.position->second);
+      }
+      layer=std::move(next);
     }
     for(auto edge:graph_.edges())put_rep({edge.destination,edge.source});
   }
@@ -174,10 +162,20 @@ public:
   void apply_batch(const std::vector<EdgeUpdate>& input,const SchedulePolicy& policy={}) {
     if(input.empty())return;
     Schedule schedule;
-    {Phase timer(metrics.schedule_ms);schedule=build_schedule(input,{},DependencyGraphMode::UpdateEdgesOnly,policy);}
-    std::set<StateKey> invalid;
+    {Phase timer(metrics.schedule_ms);schedule=build_schedule(input,graph_.edges(),DependencyGraphMode::VertexInduced,policy);}
+    WitnessStates invalid;
     std::map<DirectedEdge,EdgeUpdate> effective;
-    std::vector<Entry> repaired;
+    // Explicit completion of Algorithm 3's undefined apply(): collect all
+    // DAG frontiers, then finalize states in the actual color-set dependency
+    // DAG. Every extension adds one color, including with negative weights.
+    // This is NOT a claim that the paper publishes this internal worklist.
+    std::vector<IndexedStates> pending(k_+1);
+    auto enqueue=[&](const StateKey& key,StateValue value){
+      if(!needed(key)&&!invalid.count(key))return;
+      auto& layer=pending[cardinality(key.colors)];auto it=layer.find(key);
+      if(it==layer.end())layer.emplace(key,std::move(value));
+      else if(value.weight<it->second.weight||(value.weight==it->second.weight&&value.path<it->second.path))it->second=std::move(value);
+    };
     {
       Phase timer(metrics.repair_ms);
       for(auto u:schedule.coalesced_updates){
@@ -191,38 +189,76 @@ public:
         }
       }
       // Atomic batch-final graph is an explicit completion of undefined apply().
-      for(auto [edge,u]:effective){if(u.erase)graph_.remove_edge(u.source,u.destination);else graph_.set_edge(u.source,u.destination,u.weight);
-        dirty_closures_.insert({u.destination,u.source});}
-      for(auto key:invalid)erase(key);
-      std::vector<StateKey> order(invalid.begin(),invalid.end());
-      std::sort(order.begin(),order.end(),[](auto a,auto b){auto x=cardinality(a.colors),y=cardinality(b.colors);return x!=y?x<y:a<b;});
-      // Re-evaluate only invalidated selected witnesses, shortest color sets first.
-      for(auto key:order){++metrics.repaired;std::optional<StateValue> best;
-        for(auto [v,w]:graph_.incoming(key.destination)){
-          auto pre=dp_.find({key.source,v,key.colors^bit(key.destination)});if(pre==dp_.end())continue;
-          StateValue val{pre->second.weight+w,pre->second.path};val.path.push_back(key.destination);
-          if(!best||val.weight<best->weight||(val.weight==best->weight&&val.path<best->path))best=std::move(val);
-        }
-        if(best){offer(key,*best);repaired.push_back({key,*best,0});}
+      for(auto [edge,u]:effective){
+        const bool existed=graph_.has_edge(u.source,u.destination);
+        if(u.erase)graph_.remove_edge(u.source,u.destination);else graph_.set_edge(u.source,u.destination,u.weight);
+        dirty_closures_.insert({u.destination,u.source});
+        // A newly present closing edge makes its terminal DP state necessary;
+        // deleting it makes that state unnecessary. Shorter masks remain exact.
+        if(existed==u.erase&&bit(u.source)!=bit(u.destination))invalid.insert({u.destination,u.source,full_});
       }
+      // Keep old witnesses until their layer is finalized: unchanged repairs
+      // retain their indexes and must not cause another propagation wave.
+      for(auto key:invalid)enqueue(key,{INFINITY,{}});
     }
     {
       Phase timer(metrics.propagation_ms);
-      propagate(std::move(repaired));
       auto apply=[&](std::size_t id,int direction){
         DirectedEdge e=schedule.dependency_edges.at(id);
         if(direction>0)++metrics.forward_edges;else ++metrics.backward_edges;
         auto update=effective.find(e);if(update==effective.end()||update->second.erase||bit(e.source)==bit(e.destination))return;
         StateKey key{e.source,e.destination,bit(e.source)|bit(e.destination)};
         StateValue value{update->second.weight,{e.source,e.destination}};
-        offer(key,value);
-        // Run real propagation at each Algorithm-3 apply, not a recorded-only order.
-        propagate({{key,value,direction}});
+        enqueue(key,std::move(value));
       };
       for(const Dag& dag:schedule.dags){
         for(auto id:ready_edges(dag,schedule.dependency_edges,false,policy.topological_ties))apply(id,1);
         for(auto id:ready_edges(dag,schedule.dependency_edges,true,policy.topological_ties))apply(id,-1);
       }
+    }
+    for(std::size_t level=2;level<=k_;++level){
+      metrics.queue_peak=std::max(metrics.queue_peak,pending[level].size());
+      for(auto& [key,candidate]:pending[level]){
+        ++metrics.popped;const bool repair=invalid.count(key)!=0;
+        std::optional<StateValue> best;
+        {
+          Phase timer(metrics.repair_ms);
+          if(repair){
+            ++metrics.repaired;
+            // All smaller masks are already final for the atomic batch graph.
+            if(needed(key))for(auto [v,w]:graph_.incoming(key.destination)){
+              auto pre=dp_.find({key.source,v,key.colors^bit(key.destination)});if(pre==dp_.end())continue;
+              StateValue value{pre->second.weight+w,pre->second.path};value.path.push_back(key.destination);
+              if(!best||value.weight<best->weight||(value.weight==best->weight&&value.path<best->path))best=std::move(value);
+            }
+          }else best=std::move(candidate);
+        }
+        Phase timer(metrics.propagation_ms);
+        auto old=dp_.find(key);
+        if(best&&old!=dp_.end()&&old->second.weight==best->weight&&old->second.path==best->path){
+          if(repair)++metrics.unchanged_repairs;continue;
+        }
+        if(!repair&&old!=dp_.end()&&(old->second.weight<best->weight||(old->second.weight==best->weight&&old->second.path<best->path)))continue;
+        if(!best){erase(key);++metrics.changed_states;continue;}
+        // Repair may raise a label. Do not erase/reinsert an unchanged witness.
+        if(repair&&old!=dp_.end()){
+          bool changed_path=old->second.path!=best->path;
+          if(changed_path)unindex(key,old->second);
+          old->second=*best;if(changed_path)index(key,*best);mark(key);
+        }else offer(key,*best);
+        ++metrics.changed_states;
+        if(level==k_)continue;
+        auto extend=[&](VertexId v,double w,bool backward){
+          if(key.colors&bit(v))return;
+          StateKey next{backward?v:key.source,backward?key.destination:v,key.colors|bit(v)};
+          StateValue value{best->weight+w,best->path};
+          if(backward)value.path.insert(value.path.begin(),v);else value.path.push_back(v);
+          enqueue(next,std::move(value));
+        };
+        for(auto [v,w]:graph_.outgoing(key.destination))extend(v,w,false);
+        for(auto [v,w]:graph_.incoming(key.source))extend(v,w,true);
+      }
+      pending[level].clear();
     }
     {
       Phase timer(metrics.candidate_ms);

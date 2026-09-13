@@ -45,13 +45,15 @@ int main(int argc,char** argv){try{
  Metrics total;std::size_t states=0,candidates=0,links=0;
  for(std::size_t i=0;i<ell;++i){const Engine& e=mode=="eg"?groups[i]->engine():*engines[i];auto m=e.metrics;
    total.popped+=m.popped;total.repaired+=m.repaired;total.candidate_refreshes+=m.candidate_refreshes;total.maintained+=m.maintained;total.deferred+=m.deferred;
+   total.changed_states+=m.changed_states;total.unchanged_repairs+=m.unchanged_repairs;
    total.schedule_ms+=m.schedule_ms;total.repair_ms+=m.repair_ms;total.propagation_ms+=m.propagation_ms;total.candidate_ms+=m.candidate_ms;total.classification_ms+=m.classification_ms;
    states+=e.states().size();candidates+=e.ranking().size();links+=e.witness_links();
  }
- std::cout<<std::setprecision(17)<<"{\"method\":\"TRADER-paper-faithful-completed-v1\",\"mode\":\""<<mode<<"\",\"k\":"<<k<<",\"ell\":"<<ell<<",\"batch\":"<<batch
+ std::cout<<std::setprecision(17)<<"{\"method\":\"TRADER-paper-reconstruction-terminal-v3\",\"mode\":\""<<mode<<"\",\"k\":"<<k<<",\"ell\":"<<ell<<",\"batch\":"<<batch
  <<",\"rows\":"<<rows<<",\"queries\":"<<queries<<",\"init_ms\":"<<init<<",\"online_ms\":"<<online<<",\"core_ms\":"<<core<<",\"peak_rss_mib\":"<<peak
  <<",\"states\":"<<states<<",\"candidates\":"<<candidates<<",\"witness_links\":"<<links<<",\"queue_pops\":"<<total.popped<<",\"repaired_states\":"<<total.repaired
  <<",\"candidate_refreshes\":"<<total.candidate_refreshes<<",\"maintenance_batches\":"<<total.maintained<<",\"deferred\":"<<total.deferred
+ <<",\"state_finalizations\":"<<total.popped<<",\"changed_states\":"<<total.changed_states<<",\"unchanged_repairs\":"<<total.unchanged_repairs
 #ifdef TRADER_PROFILE
  <<",\"profile\":true,\"schedule_ms\":"<<total.schedule_ms<<",\"repair_ms\":"<<total.repair_ms<<",\"propagation_ms\":"<<total.propagation_ms<<",\"candidate_ms\":"<<total.candidate_ms<<",\"classification_ms\":"<<total.classification_ms
 #else

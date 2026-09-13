@@ -21,7 +21,12 @@ std::set<std::pair<double,Cycle>> cycles(const DirectedWeightedGraph& g,const Co
   }return result;
 }
 void check(const Engine& e,int k){
-  const auto expected=enumerate_state_oracle(e.graph(),e.colors(),k);
+  auto expected=enumerate_state_oracle(e.graph(),e.colors(),k);
+  // Only terminal nonclosing states are projected out; the oracle itself and
+  // independent exhaustive best/second-cycle checks remain unchanged.
+  for(auto it=expected.begin();it!=expected.end();){
+    if(cardinality(it->first.colors)==static_cast<std::size_t>(k)&&!e.graph().has_edge(it->first.destination,it->first.source))it=expected.erase(it);else ++it;
+  }
   auto comparison=compare_state_tables(expected,ordered(e.states()));
   if(!comparison.equal)throw std::runtime_error(comparison.first_difference);
   require(comparison.equal,"complete state table");
@@ -42,6 +47,23 @@ void check(const Engine& e,int k){
 }
 EdgeUpdate upd(int u,int v,double w,std::size_t seq,bool erase=false){return {static_cast<VertexId>(u),static_cast<VertexId>(v),w,erase,"",seq};}
 int main(){try{
+  // Two improved branches meet in one DP state: finalize the join only once.
+  DirectedWeightedGraph diamond;ColorMap dc{{0,0},{1,1},{2,1},{3,2}};
+  diamond.set_edge(0,1,10);diamond.set_edge(0,2,10);diamond.set_edge(1,3,1);diamond.set_edge(2,3,1);diamond.set_edge(3,0,3);
+  Engine shared(diamond,dc,3);
+  shared.apply_batch({upd(0,1,2,1),upd(0,2,1,2),upd(1,3,0,3),upd(2,3,0,4)});check(shared,3);
+  require(shared.states().at({0,3,7}).weight==1,"diamond join must include both branches before finalization");
+  require(shared.metrics.popped==9&&shared.metrics.changed_states==9,"diamond must finalize four edges and five closing paths exactly once");
+  DirectedWeightedGraph cancel;ColorMap cc{{0,0},{1,1},{2,2}};
+  cancel.set_edge(0,1,1);cancel.set_edge(1,2,1);cancel.set_edge(2,0,1);Engine stable(cancel,cc,3);
+  stable.apply_batch({upd(0,1,2,1),upd(1,2,0,2)});check(stable,3);
+  require(stable.metrics.unchanged_repairs==1&&stable.metrics.changed_states==4,"unchanged repaired path must retain its label without propagation");
+  DirectedWeightedGraph open;open.set_edge(0,1,-2);open.set_edge(1,2,-2);Engine closing(open,cc,3);
+  require(!closing.states().count({0,2,7}),"unclosed terminal path retained");
+  closing.apply_batch({upd(2,0,-2,1)});check(closing,3);
+  require(closing.best().weight==-6&&closing.states().count({0,2,7}),"new closing edge must materialize terminal state");
+  closing.apply_batch({upd(2,0,0,2,true)});check(closing,3);
+  require(!closing.best().exists&&!closing.states().count({0,2,7}),"removed closure must retire terminal state");
   // A literal min(old,new) weight-increase treatment leaves -2 instead of +3.
   DirectedWeightedGraph g;g.set_edge(0,1,-1);g.set_edge(1,2,-1);g.set_edge(2,0,-1);
   ColorMap c{{0,0},{1,1},{2,2}};Engine e(g,c,3);
