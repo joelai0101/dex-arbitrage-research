@@ -26,7 +26,7 @@ inline void begin(){current=other;last=Clock::now();active=true;}
 inline void end(){charge(Clock::now());active=false;}
 struct Scope {
     bool enabled;Phase previous;
-    explicit Scope(Phase phase):enabled(active),previous(current) {
+    explicit Scope(Phase phase):enabled(active && phase!=current),previous(current) {
         if(enabled){charge(Clock::now());current=phase;}
     }
     ~Scope(){if(enabled){charge(Clock::now());current=previous;}}
@@ -91,6 +91,7 @@ def main():
     save(out/'manifest.json',dict(frozen_sha256=FROZEN,driver_sha256=hashlib.sha256(driver_original.encode()).hexdigest(),
          phases=['classification','maintenance','candidates','answer','other'],exclusive_nested_scopes=True,
          initialization_profiled=False,algorithm_modified=False,formal_timing=False,
+         clock_only_on_phase_transition=True,
          generated_sha256={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in out.glob('*.cpp')}))
 
 

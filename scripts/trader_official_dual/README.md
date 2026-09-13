@@ -173,3 +173,15 @@ compilation, oracle execution, profiling or slide rendering. A single pair's
 ratio includes run/JVM variability; it is not a statistically calibrated pure
 instrumentation overhead estimate. Initialization and external trace IO are
 excluded, and phase sums include the outer timing-boundary residual as Other.
+
+Completed GraphS control/profile full traces match the original run exactly and
+retain identical backend/work counts. The profile shows path maintenance 21.59%
+and candidate refresh/ranking 78.39%; profile/control is 0.88486, which includes
+JVM and run variation and must not be interpreted as instrumentation speedup.
+
+The shared C++ scope helper now skips clock reads when a nested scope keeps the
+same phase. DELTA timer-v2 passes the four small and two full trace comparisons;
+its first profile/control ratio is 1.17943. Earlier generated binaries/results
+are unchanged. This is not proof of a causal overhead reduction relative to the
+earlier pair, because its control timing also changed. All phase figures remain
+diagnostic and no profile/control run is admitted into the formal averages.
