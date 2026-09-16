@@ -1,4 +1,4 @@
-# Deadline continuation experiment (stage 2)
+# Deadline continuation experiment (stage 3 primitives)
 
 This is an experimental execution variant, not the official TRADER implementation
 and not yet a validated 10 ms end-to-end service. Production files are unchanged.
@@ -8,8 +8,9 @@ recurrence, saving the incoming/outgoing arc cursor and propagation phase across
 calls. It accepts finite-edge insertions/reweights, deletions and no-ops within a
 fixed precolored vertex universe. Explicit connect/ensure frames preserve the
 original depth-first expansion and arc numbering across pauses. New vertices outside
-that universe, multi-color scheduling, current-graph candidate validation,
-backlog accounting and TRADER/GraphS continuations are not implemented yet.
+that universe and TRADER/GraphS continuations are not implemented yet. The
+single-engine primitive alone does not schedule multiple colorings or validate
+candidates against later arrivals.
 Unsupported operations are rejected before mutation. Partial engine answers cannot
 be published. No background worker runs after a resume call returns.
 
@@ -37,3 +38,35 @@ all completed states/indexes/work counts/answers. It uses the unchanged core's
 fixed-universe initialization, not the service driver's observed-root activation.
 Thus it is not a replay of the official benchmark service, an 80-resident scheduler
 test, or a detection-time result. No new colors or graph edges are inferred.
+
+## Multi-color service primitives
+
+`DeltaServiceContinuation` keeps all supplied colorings resident, installs arrivals
+into a separate current graph, and replays a FIFO of pending updates into the
+engines without background work. An update becomes committed only after every
+engine has completed it and published a recovered path. Per-engine cached paths
+carry their source version. Candidate queries revalidate only those cached paths
+against the latest accepted graph and return a finite negative simple k-cycle,
+its freshly summed weight, source version and graph version. No oracle or path
+search runs in this query. A stale-version path may remain valid, but is never
+returned with an unvalidated old weight.
+
+The service uses observed-root initialization. A previously unseen precolored
+vertex gets its seed state just before its first S update is installed, matching
+the normal B=1 service order. It has no previous outgoing S edges at that point,
+so creating that seed does not run a recursive graph expansion.
+
+`test_delta_service_continuation.cpp` checks 320 arrivals across k3/k5 cases with
+80 resident colorings, including 304 backlog arrivals, 1280 completed engine-state
+comparisons, no-work calls at zero/expired budgets, and invalidation of a cached
+cycle after deletion without maintenance. The original 3400-update engine tests
+also pass with the optional observed-root mode added.
+
+These remain service primitives, not the formal 10 ms driver. `accept`, parsing,
+candidate validation/copy and the actual caller return all cost time and MUST be
+charged alongside `advance_until`. That function's deadline alone is not an
+end-to-end latency bound. No per-arrival formal RE/Regret is produced here. A timed
+driver with complete-window traces, return/overshoot measurements, a fixed reserve
+policy and the real UNI trace gate is the next step. Do not drain backlog for free
+between timed arrivals. Empty candidate means no valid negative cached path was
+available, not proof that the current graph has no negative cycle.

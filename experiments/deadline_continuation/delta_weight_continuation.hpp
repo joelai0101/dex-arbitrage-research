@@ -21,6 +21,8 @@ class DeltaWeightContinuation {
     std::uint64_t completed_=0;
     std::vector<ConnectFrame> connect_stack_;
     std::size_t endpoint_pos_=0,endpoint_count_=0;
+    bool observed_roots_=false;
+    std::vector<bool> observed_;
 
     void topology_step() {
         if(connect_stack_.empty()) {
@@ -124,8 +126,16 @@ class DeltaWeightContinuation {
         }
     }
 public:
-    DeltaWeightContinuation(std::vector<int> colors,int k,const std::vector<delta::Update>& initial)
-        :engine_(std::move(colors),k) {engine_.initialize(initial);}
+    DeltaWeightContinuation(std::vector<int> colors,int k,const std::vector<delta::Update>& initial,
+                            bool observed_roots=false)
+        :engine_(std::move(colors),k),observed_roots_(observed_roots),observed_(engine_.color.size(),false) {
+        if(!observed_roots_) {engine_.initialize(initial);return;}
+        for(auto e:initial)if(e.op=='S') {
+            engine_.set_edge(e);observed_[e.u]=observed_[e.v]=true;
+        }
+        for(size_t v=0;v<observed_.size();++v)if(observed_[v])engine_.ensure(int(v),int(v),1<<engine_.color[v]);
+        engine_.propagate();engine_.recomputed=engine_.value_changed=engine_.probes=engine_.gate_skips=0;
+    }
     bool busy() const {return phase_!=Phase::idle;}
     std::uint64_t completed() const {return completed_;}
     const delta::DeltaEngine& inspect() const {return engine_;}
@@ -136,6 +146,12 @@ public:
         if((e.op!='S'&&e.op!='D')||(e.op=='S'&&!std::isfinite(e.w))||e.u<0||e.v<0||
            e.u>=int(engine_.out.size())||e.v>=int(engine_.out.size()))
             throw std::invalid_argument("expected S with finite weight, D or N within fixed vertex universe");
+        if(observed_roots_&&e.op=='S')for(int v:{e.u,e.v})if(!observed_[v]) {
+            // A never-observed vertex has no installed outgoing S edges. Therefore
+            // ensure creates just its seed state before the first edge is installed.
+            if(!engine_.out[v].empty())throw std::logic_error("unobserved vertex already has outgoing edges");
+            observed_[v]=true;engine_.ensure(v,v,1<<engine_.color[v]);
+        }
         auto it=engine_.out[e.u].find(e.v);
         const double old=it==engine_.out[e.u].end()?delta::INF:engine_.edges[it->second].w;
         const double fresh=e.op=='D'?delta::INF:e.w;
