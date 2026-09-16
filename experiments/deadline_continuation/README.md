@@ -1,4 +1,4 @@
-# Deadline continuation experiment (stage 4 window pilot)
+# Deadline continuation experiment (DELTA window / TRADER primitive)
 
 This is an experimental execution variant, not the official TRADER implementation
 and not yet a validated 10 ms end-to-end service. Production files are unchanged.
@@ -8,7 +8,8 @@ recurrence, saving the incoming/outgoing arc cursor and propagation phase across
 calls. It accepts finite-edge insertions/reweights, deletions and no-ops within a
 fixed precolored vertex universe. Explicit connect/ensure frames preserve the
 original depth-first expansion and arc numbering across pauses. New vertices outside
-that universe and TRADER/GraphS continuations are not implemented yet. The
+that universe and GraphS continuations are not implemented yet. TRADER has the
+separate single-engine primitive described below, not a complete service. The
 single-engine primitive alone does not schedule multiple colorings or validate
 candidates against later arrivals.
 Unsupported operations are rejected before mutation. Partial engine answers cannot
@@ -101,3 +102,37 @@ These are single-run observations, not a hard-real-time guarantee, global exact-
 quality certification, or a three-method Effectiveness table. No RE/Regret has yet
 been joined to the independent global oracle for this new trace. The normalized N
 semantics and frozen coloring universe retain the normal benchmark's limitations.
+
+## TRADER stack-preserving primitive (Windows)
+
+`cooperative_fiber.hpp` saves the existing C++ call stack at explicit loop-entry
+checkpoints instead of replacing TRADER's DP recurrence with another algorithm.
+Fibers execute cooperatively on the caller thread, not a background worker.
+Zero-step or expired calls execute no maintenance. Suspended local containers,
+references and recursion frames remain alive. The engine may be internally partial
+while suspended: do not inspect/publish it or mutate it from another arrival.
+Destruction cancels and unwinds suspended locals; that private partial engine must
+then be discarded, never reused as a committed result.
+
+The private gate builder is `6D/code/tools/run_trader_fiber_gate_20260916.py` in
+the surrounding research workspace (excluded from this repository). It verifies
+the frozen `service_v1/official` hashes from the existing EG protocol, creates an
+isolated copy with 37 detector and 3 graph loop checkpoints, and exposes fields
+only for testing. Stripping inserted checkpoint markers exactly recovers each
+original source text. Official files are not edited or copied into this repository.
+
+`test_trader_fiber.cpp` compares paused execution to the same frozen operations
+with inactive checkpoint calls. All DP values, candidate weight/path, pending
+batch/counters, threshold, RNG, colors and graph adjacency/weights must match after
+each completed update and test-only EOF flush. k3/k5, four deterministic all-color
+fixtures, B=1/50/100/500/1000 and EG passed 5,088 comparisons with 59,546 pauses and
+165,004 checkpoint steps. Inputs here are reweights and explicit no-ops; insertion,
+the real UNI prefix, multiple resident engines, FIFO versions, current-graph cached
+candidate validation and complete-window timing are NOT covered yet.
+
+The initial test fixture could omit one color and fail its initial-negative-cycle
+precondition. That failed binary is retained; the corrected fixture selects seeds
+by full-color coverage before constructing either engine, not by measured speed
+or output quality. The completed gate is not a detection-time or Effectiveness
+result. Individual allocation/container operations and OS scheduling can still
+overshoot a deadline; a later full-window service must charge and record them.
