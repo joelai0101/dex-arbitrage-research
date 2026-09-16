@@ -193,3 +193,33 @@ The first window compile failed on an explicit chrono constructor in a test;
 its logs remain in the non-v2 directory. No timed attempt ran before that fix.
 Full-stream timing and offline oracle quality are the next steps; do not rerun
 the completed 32-row prefix solely to obtain a more favorable outcome.
+
+## Full TRADER pilot and GraphS continuation primitive
+
+The subsequent full UNI1 TRADER pilot completed 7,628 arrivals with 66 late
+returns, zero missing/invalid candidates, 99.1348% on-time valid coverage and
+5,364 pending arrivals at EOF. No free drain was performed. All-returned
+RE=0.008193754413259667% and cumulative absolute Regret=3.0563702360168676
+include late rows and are diagnostic, not complete strict-deadline quality.
+The full source trace and offline report remain outside this code repository.
+
+`graphs/GraphSContinuation.java` is an isolated same-caller-thread stackful
+continuation experiment using the installed JDK 25.0.3 internal VM API. It
+requires `--add-exports java.base/jdk.internal.vm=ALL-UNNAMED` at compile/run.
+This is not a supported portable Java API or a hard-real-time guarantee.
+No worker, forced thread stop, or background maintenance is used. Cancellation
+unwinds finally blocks only to discard a private unfinished engine, not rollback.
+
+The runner `run_graphs_continuation_gate_20260916.py` in the surrounding tools
+directory freezes the common-input GraphS adapter and length-index backend,
+inserts 4/15 checkpoints in private copies and verifies that removing their
+markers exactly recovers each source. Reference calls use the same source with
+checkpoints inactive. Original source and formal binaries are unchanged.
+
+`TestGraphSContinuation.java` passed 342 completed-state comparisons across
+k=3/5, HP thresholds 2/6/40, with reweights, N, deletions, insertions and new
+vertices. It compared all candidates/ranking, weights, HP paths with multiplicity,
+membership and all-pair bounded paths, including 16,599 pauses and interleaved
+continuations. Zero/expired budgets, exception return and cancellation passed.
+This test's drains are for correctness only. GraphS FIFO service, independent
+live-graph candidate validation and the complete 10 ms window remain to be built.
