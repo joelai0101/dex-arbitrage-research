@@ -221,5 +221,27 @@ k=3/5, HP thresholds 2/6/40, with reweights, N, deletions, insertions and new
 vertices. It compared all candidates/ranking, weights, HP paths with multiplicity,
 membership and all-pair bounded paths, including 16,599 pauses and interleaved
 continuations. Zero/expired budgets, exception return and cancellation passed.
-This test's drains are for correctness only. GraphS FIFO service, independent
-live-graph candidate validation and the complete 10 ms window remain to be built.
+This test's drains are for correctness only.
+
+## GraphS resident service and complete-window pilot
+
+`GraphSServiceContinuation` adds a FIFO and independent current graph. New
+arrivals never mutate the paused engine. Only a completed apply publishes its
+cached best path; each query validates that path on the current graph without
+searching for a replacement. Accepted, completed and candidate-source versions
+are separate. Tests passed 897 arrivals, 618 debt observations, 42 full-state
+comparisons and 564 older-source query observations, including invalidated caches.
+
+`GraphSWindow` includes read/parse/accept, maintenance, candidate validation and
+actual caller return in a fixed 10 ms window with 1 ms reserve. No worker or
+between-window maintenance exists. EOF discards the paused private engine.
+`RunGraphSWindow case output.csv golden.tsv` runs the 32-row gate; `--full`
+selects the fixed 7,628-row UNI1 stream. Do not retry preserved timed runs.
+
+The prefix had 7 late returns and 30 pending arrivals at EOF. The subsequent
+full pilot had 186 late, zero missing/invalid candidates, 97.5616% on-time valid
+coverage, max return 180.1002 ms and 7,343 pending arrivals at EOF. Only 285
+updates had completed. All-returned RE=0.176255362419293% and cumulative absolute
+Regret=65.71339010939313 include late rows and are diagnostic. These numbers do
+not establish complete strict-deadline effectiveness or a three-method six-dataset
+four-round result. Original GraphS sources and normal results remain unchanged.
