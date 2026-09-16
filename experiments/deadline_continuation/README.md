@@ -136,3 +136,23 @@ by full-color coverage before constructing either engine, not by measured speed
 or output quality. The completed gate is not a detection-time or Effectiveness
 result. Individual allocation/container operations and OS scheduling can still
 overshoot a deadline; a later full-window service must charge and record them.
+
+### Topology, interleaving and real-input gate
+
+`test_trader_fiber_topology.cpp` adds new-source, new-destination and both-new
+insertions, reweights of inserted edges and N updates. Two independently seeded
+engines remain suspended and resume alternately on the same caller thread; each
+resume must leave the other fiber's work counter unchanged. k3/k5 and the five
+fixed B modes plus EG passed 2,616 completed-state comparisons, 19,997 pauses and
+58,777 checkpoint steps. EG uses batch parameter 1, matching the frozen service
+driver. Test-only EOF flushes cover the larger pending fixed batches.
+
+The real-input mode reads the frozen common UNI1 graph/update stream and original
+official seed file. All first 32 updates across 80 colorings passed 2,560 completed
+state comparisons with 112,732 pauses and 1,919,352 steps. Engine pairs are tested
+sequentially to bound memory, and the prefix is NOT flushed as a synthetic EOF.
+This is not 80 engines simultaneously resident, not FIFO backlog/candidate-version
+validation, and not formal detection-time or 10 ms quality. Existing core source
+hashes remain unchanged. The surrounding workspace runner is
+`6D/code/tools/run_trader_topology_gate_20260916.py`; outputs and source hashes are
+in `.research_data/common_benchmark/trader_fiber_topology_20260916/manifest.json`.
