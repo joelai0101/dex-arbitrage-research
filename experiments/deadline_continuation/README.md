@@ -1,4 +1,4 @@
-# Deadline continuation experiment (stage 3 primitives)
+# Deadline continuation experiment (stage 4 window pilot)
 
 This is an experimental execution variant, not the official TRADER implementation
 and not yet a validated 10 ms end-to-end service. Production files are unchanged.
@@ -70,3 +70,34 @@ driver with complete-window traces, return/overshoot measurements, a fixed reser
 policy and the real UNI trace gate is the next step. Do not drain backlog for free
 between timed arrivals. Empty candidate means no valid negative cached path was
 available, not proof that the current graph has no negative cycle.
+
+## Complete-window pilot
+
+`delta_window.hpp` reads/parses one normalized input row, accepts it into the live
+graph/FIFO, resumes old/new maintenance, validates cached candidates and constructs
+the response. The caller measures from BEFORE entering this function until AFTER
+receiving the complete response. The frozen pilot policy is 10 ms total with 1 ms
+reserved for validation/return. Cooperative work or OS scheduling may overshoot;
+all actual overshoots must be retained, not retried away. `test_delta_window.cpp`
+checks zero/expired maintenance budgets, malformed-input rejection, timestamp
+ordering, FIFO debt and current-weight revalidation after delete/reinsert.
+
+`run_delta_window.cpp graph updates colors count trace.csv` records per-phase ns,
+actual in-process caller receipt, overshoot, accepted/committed/candidate versions,
+work counters, backlog and every returned path or missing result. It never drains
+backlog between requests or at EOF. Initialization is outside the windows. Diagnostic
+trace persistence and unlimited reference replay happen AFTER all timed requests
+and destruction of the service. The independent post-run path check uses the live
+graph and verifies closure, simplicity, exact-5 length, coloring and actual weight.
+Rows with no remaining debt also compare against the unchanged unlimited DELTA core.
+
+The first UNI1 32-row gate passed with 32 legal candidates, 31 complete-reference
+comparisons, no late/missing returns, maximum return 9.0418 ms, and maximum debt 1.
+One subsequent full 7628-row pilot passed with 7628 legal candidates, 7186 complete
+reference comparisons, 0 late/missing returns, maximum return 9.0842 ms, maximum debt
+2, and zero EOF debt without a flush. 442 responses had outstanding work; 3 selected
+a candidate from an older source version, revalidated against the current graph.
+These are single-run observations, not a hard-real-time guarantee, global exact-k
+quality certification, or a three-method Effectiveness table. No RE/Regret has yet
+been joined to the independent global oracle for this new trace. The normalized N
+semantics and frozen coloring universe retain the normal benchmark's limitations.
