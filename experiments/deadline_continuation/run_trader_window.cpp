@@ -25,18 +25,20 @@ int main(int argc,char** argv) {
         catch(const std::exception&){rejected=true;}assert(rejected&&service.accepted()==2);
         std::cout<<"PASS window zero/expired budgets, parse rejection, ordering, no free maintenance\n";return 0;
     }
-    if(argc!=5)throw std::runtime_error("graph updates seeds output-csv; fixed 32-row pilot");
+    const bool full=argc==6&&std::string(argv[5])=="--full";
+    if(argc!=5&&!full)throw std::runtime_error("graph updates seeds output-csv [--full]");
+    const unsigned count=full?7628:32;
     DirectedGraph graph;graph.load_edge_list(argv[1]);
     std::ifstream seeds_file(argv[3]);std::string line;std::getline(seeds_file,line);assert(std::getline(seeds_file,line));
     std::istringstream row(line);std::vector<unsigned> seeds;unsigned seed;
     while(row>>seed)seeds.push_back(seed);assert(seeds.size()>=80);seeds.resize(80);
     struct Record {TraderWindowResponse response;Clock::time_point start,end;};
-    std::vector<Record> records;records.reserve(32);
+    std::vector<Record> records;records.reserve(count);
     uint64_t eof_debt=0;
     {
         TraderServiceContinuation service(graph,5,seeds);
         std::ifstream updates(argv[2]);assert(updates);uint64_t previous_steps=0;
-        for(unsigned i=0;i<32;++i) {
+        for(unsigned i=0;i<count;++i) {
             assert(service.work_steps()==previous_steps);
             const auto start=Clock::now();auto response=serve_trader_window(service,updates,start);
             const auto end=Clock::now();previous_steps=response.steps_after;
@@ -79,7 +81,7 @@ int main(int argc,char** argv) {
         out<<c.source_version<<','<<std::setprecision(17)<<c.weight<<",\"";
         for(auto vertex:c.path)out<<vertex<<' ';out<<"\"\n";
     }
-    std::cout<<"PASS UNI1-prefix32 full-window pilot late="<<late<<" missing="<<missing
+    std::cout<<"PASS UNI1-"<<(full?"full7628":"prefix32")<<" full-window protocol audit late="<<late<<" missing="<<missing
              <<" older_source="<<older<<" max_backlog="<<max_debt<<" eof_backlog="<<eof_debt
-             <<" max_return_ns="<<maximum<<"; not full-stream Effectiveness\n";
+             <<" max_return_ns="<<maximum<<"; single pilot, not three-method Effectiveness\n";
 }
