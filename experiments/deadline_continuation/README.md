@@ -156,3 +156,40 @@ validation, and not formal detection-time or 10 ms quality. Existing core source
 hashes remain unchanged. The surrounding workspace runner is
 `6D/code/tools/run_trader_topology_gate_20260916.py`; outputs and source hashes are
 in `.research_data/common_benchmark/trader_fiber_topology_20260916/manifest.json`.
+
+### TRADER resident service and complete-window prefix pilot
+
+`trader_service_continuation.hpp` keeps 80 independent engines, a FIFO of accepted
+S/N arrivals, an independent current graph, and only completed-call cached paths.
+One caller-thread fiber processes pending arrivals in order across all engines.
+`completed()` means all engines returned from common_apply for that arrival; EG
+may still buffer a batch. It does NOT assert all graph changes are in every DP.
+Candidate source_version is the processed prefix at the completed cache capture,
+not proof that the path itself changed then. Returned paths are checked for closure,
+simple exact-k shape, colorfulness at publication, and negative actual weight on
+the latest accepted graph. Query never traverses a partial DP or performs a search.
+
+The new service test passed 340 arrivals, 330 backlogged arrivals, 800 full-engine
+comparisons and 11,280 valid older-source query observations. With all initial
+edges made positive and maintenance stopped, every old negative cached path was
+correctly filtered out. Zero/expired calls, malformed-update rejection, hidden
+partial engines and destruction of a suspended private service were checked.
+Test-only drains validate correctness; the timed window has no such drain.
+
+`trader_window.hpp` and `run_trader_window.cpp` use the same 10 ms total window and
+fixed 1 ms validation/return reserve as the DELTA pilot. Input reading, parsing/
+acceptance, FIFO maintenance, cache validation/copy and actual in-process return
+are charged. Post-run trace output and independent graph replay are diagnostic,
+not online search. No maintenance occurs between returns/next calls or at EOF.
+The prefix pilot completed 32 arrivals: zero late/missing, all returned paths
+valid, 18 debt/older-source rows, maximum backlog 13, EOF backlog 0, maximum actual
+return 9.3325 ms. All phase durations sum to actual return time. This is neither
+full UNI1 quality nor hard-real-time proof or the three-method Effectiveness table.
+
+Runner: `run_trader_topology_gate_20260916.py --service` or `--window` in the
+surrounding tools directory. Successful output is `trader_service_gate_20260916/`
+and `trader_window_prefix_20260916_v2/` under the private benchmark directory.
+The first window compile failed on an explicit chrono constructor in a test;
+its logs remain in the non-v2 directory. No timed attempt ran before that fix.
+Full-stream timing and offline oracle quality are the next steps; do not rerun
+the completed 32-row prefix solely to obtain a more favorable outcome.
