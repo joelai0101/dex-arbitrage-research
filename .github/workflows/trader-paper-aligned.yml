@@ -1,0 +1,40 @@
+name: TRADER paper-aligned correctness
+
+on:
+  pull_request:
+    paths:
+      - 'trader_paper_faithful/**'
+      - '.github/workflows/trader-paper-aligned.yml'
+  push:
+    branches: [main, 'feature/trader-paper-aligned']
+    paths:
+      - 'trader_paper_faithful/**'
+      - '.github/workflows/trader-paper-aligned.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  correctness:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check DP, distinct C1/C2, DAG passes and EG on independent oracles
+        shell: bash
+        run: python trader_paper_faithful/validate.py --compiler "$(command -v c++)" --output "$RUNNER_TEMP/trader-paper-aligned-validation"
+      - name: Preserve diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trader-paper-aligned-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/trader-paper-aligned-validation/validation.json
+            ${{ runner.temp }}/trader-paper-aligned-validation/*.log
