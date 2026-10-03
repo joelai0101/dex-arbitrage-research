@@ -87,6 +87,26 @@ int main(int argc, char** argv) {
         s.common_apply("0 1 -3");
         check("best_cycle_edge_immediate", s.regression_pending() == 0 && edge(s, 0, 1) == -3);
     }
+#ifdef WITNESS_REGRESSION
+    {
+        auto s = make();
+        s.common_apply("2 3 -3");
+        check("backward_mask_includes_root", s.regression_endpoint_masks_valid());
+    }
+    {
+        auto s = make();
+        s.common_apply("4 0 -3");
+        check("destination_zero_graph", edge(s, 4, 0) == -3);
+        check("destination_zero_report", s.common_weight() == -11);
+    }
+    {
+        auto s = make();
+        unsigned same_color = 5;
+        while (s.common_colors().at(same_color) != s.common_colors().at(0)) ++same_color;
+        s.common_apply(std::to_string(same_color) + " 0 -7");
+        check("same_color_destination_zero_graph", edge(s, same_color, 0) == -7);
+    }
+#endif
     // Report, but do not silently repair, the independently known gap failure.
     {
         DirectedGraph graph;

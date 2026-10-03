@@ -1,4 +1,4 @@
-"""Verify the existing minimal TRADER EG old/new-weight repair in isolation.
+"""Verify localized TRADER EG weight-accounting and witness repairs in isolation.
 
 Inputs are locally supplied, frozen service sources; no upstream code is vendored.
 An optional single UNI1 quality replay is diagnostic, never a formal timing run.
@@ -21,6 +21,24 @@ def sha(path):
 
 def save(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False), encoding="utf-8")
+
+
+def fix_witness_updates(cpp):
+    """Two localized fixes, identical to the prior diagnostic minpatch changes."""
+    begin = cpp.index("void KCycleColorCoding::backword_dfs(")
+    end = cpp.index("void KCycleColorCoding::get_all_back_dfs_nodes(", begin)
+    backward = cpp[begin:end]
+    anchor = "        if(pre < dst_node) {"
+    assert backward.count(anchor) == 1
+    backward = backward.replace(anchor, anchor + "\n            color_set |= pre_color;")
+    anchor = "                color_set &= ~pre_color;\n            }"
+    assert backward.count(anchor) == 1
+    backward = backward.replace(anchor, "            }\n            color_set &= ~pre_color;")
+    cpp = cpp[:begin] + backward + cpp[end:]
+    begin = cpp.index("                if(dst_node == 0){")
+    end = cpp.index("\n            }\n        } else {", begin)
+    cpp = cpp[:begin] + "                update_edge_weight(src_node, dst_node, weight, trial_best_weight, trial_best_cycle);" + cpp[end:]
+    return cpp
 
 
 def score(case, reference, trace, colors):
@@ -69,6 +87,7 @@ def main():
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--replay-uni1", action="store_true")
+    parser.add_argument("--witness-fix", action="store_true", help="Also test predecessor-mask and destination-zero repairs")
     args = parser.parse_args()
     root, out = args.root.resolve(), args.output.resolve()
     out.mkdir(parents=True, exist_ok=False)
@@ -122,19 +141,34 @@ def main():
     (out / "weight_fix.diff").write_text("".join(difflib.unified_diff(
         original.splitlines(True), fixed.splitlines(True), fromfile="official/cycle_detector.cpp",
         tofile="weight_fixed/cycle_detector.cpp")), encoding="utf-8")
+    variants = [("original", original), ("weight_fixed", fixed)]
+    if args.witness_fix:
+        witness_fixed = fix_witness_updates(fixed)
+        variants.append(("witness_fixed", witness_fixed))
+        (out / "witness_fix.diff").write_text("".join(difflib.unified_diff(
+            fixed.splitlines(True), witness_fixed.splitlines(True), fromfile="weight_fixed/cycle_detector.cpp",
+            tofile="witness_fixed/cycle_detector.cpp")), encoding="utf-8")
     accessor = """
 #ifdef EG_REGRESSION
     double regression_decrease() const { return cumulative_weight; }
     size_t regression_pending() const { return batch_lines.size(); }
     double regression_gap() const { return batch_weight_threshold_; }
     void regression_set_gap(double gap) { batch_weight_threshold_ = gap; }
+    bool regression_endpoint_masks_valid() const {
+        for (const auto& root : full_dp_table)
+            for (const auto& end : root.second)
+                for (const auto& label : end.second)
+                    if (!(label.first & (1 << node_colors.at(root.first))) ||
+                        !(label.first & (1 << node_colors.at(end.first)))) return false;
+        return true;
+    }
 #endif
 """
     graph = out / "two_cycles.txt"
     graph.write_text("".join(f"{start+i} {start+(i+1)%5} {weight}\n"
                              for start, weight in [(0, -2), (5, -1)] for i in range(5)))
     checks = {}
-    for variant, text in [("original", original), ("weight_fixed", fixed)]:
+    for variant, text in variants:
         source = out / variant
         source.mkdir()
         for name, path in sources.items():
@@ -147,8 +181,10 @@ def main():
         command = [compiler, "-O3", "-std=c++17", "-include", compat, "-I", source,
                    source / "directed_graph.cpp", source / "cycle_detector.cpp"]
         binary = out / f"{variant}_regression.exe"
-        run([*command, "-DEG_REGRESSION", scripts / "eg_regression.cpp", "-o", binary], f"compile_{variant}")
-        raw = run([binary, graph], f"regression_{variant}", expected=(1,) if variant == "original" else (0,))
+        flags = ["-DEG_REGRESSION"] + (["-DWITNESS_REGRESSION"] if args.witness_fix else [])
+        run([*command, *flags, scripts / "eg_regression.cpp", "-o", binary], f"compile_{variant}")
+        expect_failure = variant == "original" or (args.witness_fix and variant == "weight_fixed")
+        raw = run([binary, graph], f"regression_{variant}", expected=(1,) if expect_failure else (0,))
         records = [line.split("\t") for line in raw.splitlines()]
         checks[variant] = {
             "checks": {parts[1]: parts[2] for parts in records if parts[0] == "CHECK"},
@@ -157,14 +193,18 @@ def main():
                  for parts in records if parts[0] == "GAP_WITNESS"),
         }
     expected_failures = {"decrease_retained", "repeated_edge_accounting", "equal_gap_deferred", "above_gap_flushes"}
-    assert {name for name, value in checks["original"]["checks"].items() if value == "FAIL"} == expected_failures
-    assert all(value == "PASS" for value in checks["weight_fixed"]["checks"].values())
-    result = dict(regression=checks, scope="EG old/new weight lookup only", formal_benchmark=False,
-                  equivalent_to_existing_oldnew_source=True, baseline_accepted=False)
+    witness_failures = {"backward_mask_includes_root", "destination_zero_graph", "destination_zero_report", "same_color_destination_zero_graph"} if args.witness_fix else set()
+    assert {name for name, value in checks["original"]["checks"].items() if value == "FAIL"} == expected_failures | witness_failures
+    assert {name for name, value in checks["weight_fixed"]["checks"].items() if value == "FAIL"} == witness_failures
+    if args.witness_fix:
+        assert all(value == "PASS" for value in checks["witness_fixed"]["checks"].values())
+    selected = variants[-1][0]
+    result = dict(regression=checks, scope="EG weight lookup, predecessor mask and destination-zero update" if args.witness_fix else "EG old/new weight lookup only", formal_benchmark=False,
+                  weight_stage_matches_existing_oldnew_source=True, baseline_accepted=False)
     save(out / "regression.json", result)
     if args.replay_uni1:
         # Build without test accessors enabled, using the exact existing driver.
-        binary = out / "weight_fixed_normal.exe"
+        binary = out / f"{selected}_normal.exe"
         run([*command, driver, "-lpsapi", "-o", binary], "compile_replay")
         spec = protocol["cases"]["UNI1"]
         case, reference = root / spec["path"], root / spec["reference"]
@@ -179,7 +219,7 @@ def main():
         assert runtime["updates"] == spec["updates"] == 7628 and runtime["ell"] == 80
         save(out / "diagnostic_runtime.json", dict(runtime=runtime, formal_benchmark=False, not_for_speed_comparison=True))
         colors = json.loads(color_path.read_text())
-        for variant, trace in [("original", old_trace), ("weight_fixed", out / "trace.tsv")]:
+        for variant, trace in [("original", old_trace), (selected, out / "trace.tsv")]:
             counts, failures = score(case, reference, trace, colors)
             save(out / f"{variant}_failures.json", failures)
             result[variant + "_UNI1"] = counts
