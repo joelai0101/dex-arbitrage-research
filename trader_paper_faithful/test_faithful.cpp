@@ -1,7 +1,9 @@
+#define TRADER_TEST_HOOKS
 #include "faithful.h"
 #include <functional>
 #include <iostream>
 #include <random>
+#include <tuple>
 using namespace trader::faithful;
 std::size_t checks=0;
 void require(bool ok,const char* message){++checks;if(!ok)throw std::runtime_error(message);}
@@ -48,6 +50,78 @@ void check(const Engine& e,int k){
   }
 }
 EdgeUpdate upd(int u,int v,double w,std::size_t seq,bool erase=false){return {static_cast<VertexId>(u),static_cast<VertexId>(v),w,erase,"",seq};}
+void algorithm3_edge_apply_regression(){
+  DirectedWeightedGraph graph;ColorMap colors{{0,0},{1,1},{2,2},{3,3}};
+  graph.set_edge(0,1,10);graph.set_edge(1,2,10);graph.set_edge(2,3,1);graph.set_edge(3,0,1);
+  // The branch makes source 0 tie for maximum degree and keeps both chain
+  // edges in one DAG. A bare chain starts at its higher-degree middle vertex.
+  auto chain=graph;auto chain_colors=colors;chain_colors[4]=1;chain.set_edge(0,4,10);
+  const std::vector<EdgeUpdate> chain_updates{upd(0,1,2,1),upd(1,2,3,2),upd(0,4,6,3)};
+  require(build_schedule(chain_updates,chain.edges(),DependencyGraphMode::VertexInduced).dags.size()==1,"edge-apply fixture must have one DAG");
+  Engine engine(chain,chain_colors,4);
+  std::vector<std::tuple<int,VertexId,VertexId,bool>> trace;
+  bool applying=false;
+  engine.observe_batch_edge=[&](int direction,DirectedEdge edge,bool completed){
+    // This checks the actual DP before the successor is popped, not a planned order.
+    if(direction==1&&!(edge==DirectedEdge{0,1})&&!completed){
+      require(engine.states().at({0,1,3}).weight==2,"Algorithm 3 must apply the previous edge before popping another");
+      require(engine.states().at({0,2,7}).weight==5,"edge apply must finish its DP propagation before successor release");
+    }
+    require(completed==applying,"Algorithm 3 pop/apply events must alternate");
+    applying=!completed;trace.emplace_back(direction,edge.source,edge.destination,completed);
+  };
+  engine.apply_batch(chain_updates);check(engine,4);
+  require(!applying,"Algorithm 3 left an edge apply unfinished");
+  const std::vector<std::tuple<int,VertexId,VertexId,bool>> expected{
+    {1,0,1,false},{1,0,1,true},{1,0,4,false},{1,0,4,true},{1,1,2,false},{1,1,2,true},
+    {-1,1,2,false},{-1,1,2,true},{-1,0,4,false},{-1,0,4,true},{-1,0,1,false},{-1,0,1,true}};
+  require(trace==expected,"Algorithm 3 must finish forward before reverse sink-to-source application");
+  std::cout<<"GATE algorithm3_edge_apply_before_release PASS\n";
+
+  Engine reverse(graph,colors,4);bool backward_applied=false;
+  reverse.observe_batch_edge=[&](int direction,DirectedEdge edge,bool completed){
+    require(edge==DirectedEdge{1,2},"single scheduled edge");
+    const double prefix=reverse.states().at({0,2,7}).weight;
+    require(prefix==(direction<0&&completed?12:20),"reverse apply must update the prefix before reporting completion");
+    if(direction<0&&completed)backward_applied=true;
+  };
+  reverse.apply_batch({upd(1,2,2,1)});check(reverse,4);
+  require(backward_applied,"backward edge apply was not executed");
+  std::cout<<"GATE algorithm3_backward_dp_application PASS\n";
+
+  auto induced_graph=graph;induced_graph.set_edge(0,2,20);
+  Engine induced(induced_graph,colors,4);
+  std::set<std::tuple<int,VertexId,VertexId>> completed_edges;
+  induced.observe_batch_edge=[&](int direction,DirectedEdge edge,bool completed){
+    if(completed)require(completed_edges.emplace(direction,edge.source,edge.destination).second,"scheduled edge applied twice in the same direction");
+  };
+  induced.apply_batch({upd(0,1,2,1),upd(2,3,2,2)});check(induced,4);
+  for(auto edge:induced_graph.edges())for(int direction:{1,-1})
+    require(completed_edges.count({direction,edge.source,edge.destination})==1,"unchanged induced edge must execute both directional applies");
+  std::cout<<"GATE algorithm3_unchanged_induced_edge_application PASS\n";
+}
+void algorithm3_queue_regression(){
+  const std::vector<DirectedEdge> edges{{0,1},{0,2},{1,3},{2,3},{3,4}};
+  const Dag dag{{0,1,2,3,4},{0,1,2,3,4}};
+  for(bool backward:{false,true})for(auto ties:{TieBreakDirection::Ascending,TieBreakDirection::Descending}){
+    std::set<std::size_t> applied;
+    apply_ready_edges(dag,edges,backward,ties,[&](std::size_t id){
+      for(std::size_t predecessor=0;predecessor<edges.size();++predecessor){
+        const bool depends=backward?edges[id].destination==edges[predecessor].source
+                                   :edges[predecessor].destination==edges[id].source;
+        if(depends)require(applied.count(predecessor)==1,"a merge must wait for every completed edge apply");
+      }
+      require(applied.insert(id).second,"an edge was applied more than once in a direction");
+    });
+    require(applied.size()==edges.size(),"a ready edge was omitted");
+  }
+  std::size_t calls=0;bool failed=false;
+  try{
+    apply_ready_edges(dag,edges,false,TieBreakDirection::Ascending,[&](std::size_t){++calls;throw std::runtime_error("apply failed");});
+  }catch(const std::runtime_error&){failed=true;}
+  require(failed&&calls==1,"failed apply must not advance the queue");
+  std::cout<<"GATE algorithm3_all_dependencies_and_failure_boundary PASS\n";
+}
 void alignment_regressions(){
   // Official/minpatch counterexample: both cycles share (source=0,end=4,mask=31).
   DirectedWeightedGraph shared;ColorMap colors;
@@ -112,14 +186,16 @@ void alignment_regressions(){
   std::cout<<"GATE algorithms_2_3_schedule PASS\n";
 }
 int main(){try{
+  algorithm3_edge_apply_regression();
+  algorithm3_queue_regression();
   alignment_regressions();
-  // Two improved branches meet in one state; coalesce within each DAG pass.
+  // Two improved branches meet in one state across sequential edge applies.
   DirectedWeightedGraph diamond;ColorMap dc{{0,0},{1,1},{2,1},{3,2}};
   diamond.set_edge(0,1,10);diamond.set_edge(0,2,10);diamond.set_edge(1,3,1);diamond.set_edge(2,3,1);diamond.set_edge(3,0,3);
   Engine shared(diamond,dc,3);
   shared.apply_batch({upd(0,1,2,1),upd(0,2,1,2),upd(1,3,0,3),upd(2,3,0,4)});check(shared,3);
   require(shared.states().at({0,3,7}).weight==1,"diamond join must include both branches before finalization");
-  require(shared.metrics.popped<14&&shared.metrics.changed_states==9&&shared.metrics.nonimproving_rejected>0,"reject nonimproving labels before queue insertion; retain both DAG direction passes");
+  require(shared.metrics.nonimproving_rejected>0,"reject nonimproving labels during per-edge apply");
   require(shared.metrics.dag_forward_passes>0&&shared.metrics.dag_forward_passes==shared.metrics.dag_backward_passes&&shared.metrics.algorithm1_calls==0,"batch must execute separate DAG direction passes");
   DirectedWeightedGraph cancel;ColorMap cc{{0,0},{1,1},{2,2}};
   cancel.set_edge(0,1,1);cancel.set_edge(1,2,1);cancel.set_edge(2,0,1);Engine stable(cancel,cc,3);

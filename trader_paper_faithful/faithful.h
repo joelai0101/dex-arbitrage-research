@@ -8,6 +8,9 @@
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
+#ifdef TRADER_TEST_HOOKS
+#include <functional>
+#endif
 
 namespace trader::faithful {
 using namespace paper_batch;
@@ -31,9 +34,11 @@ using IndexedStates=std::unordered_map<StateKey,StateValue,StateHash,SameState>;
 using WitnessStates=std::unordered_set<StateKey,StateHash,SameState>;
 inline std::size_t cardinality(ColorMask m) { std::size_t n=0;for(;m;m&=m-1)++n;return n; }
 inline Cycle canonical(Cycle p) {p.pop_back();std::rotate(p.begin(),std::min_element(p.begin(),p.end()),p.end());p.push_back(p.front());return p;}
-// Algorithm 3 source/sink edge queues with explicit predecessor/successor gates.
-inline std::vector<std::size_t> ready_edges(const Dag& dag,const std::vector<DirectedEdge>& edges,
-                                          bool backward,TieBreakDirection ties){
+// Algorithm 3: pop -> apply to DP -> release successors/predecessors.
+// The callback finishes before an edge is marked processed or unlocks dependents.
+template<class Apply>
+inline void apply_ready_edges(const Dag& dag,const std::vector<DirectedEdge>& edges,
+                              bool backward,TieBreakDirection ties,Apply apply){
   auto topology=backward?backward_edge_order(dag,edges,ties):forward_edge_order(dag,edges,ties);
   std::map<VertexId,std::vector<std::size_t>> starts,ends;
   std::map<std::size_t,std::size_t> rank,remaining;
@@ -42,12 +47,17 @@ inline std::vector<std::size_t> ready_edges(const Dag& dag,const std::vector<Dir
   using Ready=std::pair<std::size_t,std::size_t>;
   std::priority_queue<Ready,std::vector<Ready>,std::greater<Ready>> queue;
   for(auto id:dag.edge_indices){auto e=edges.at(id);if(backward)std::swap(e.source,e.destination);remaining[id]=ends[e.source].size();if(!remaining[id])queue.push({rank[id],id});}
-  std::vector<std::size_t> order;
-  while(!queue.empty()){auto id=queue.top().second;queue.pop();order.push_back(id);
+  std::size_t processed=0;
+  while(!queue.empty()){auto id=queue.top().second;queue.pop();apply(id);++processed;
     auto e=edges.at(id);if(backward)std::swap(e.source,e.destination);
     for(auto next:starts[e.destination])if(--remaining.at(next)==0)queue.push({rank[next],next});
   }
-  if(order.size()!=dag.edge_indices.size())throw std::logic_error("Algorithm 3 queue coverage");
+  if(processed!=dag.edge_indices.size())throw std::logic_error("Algorithm 3 queue coverage");
+}
+inline std::vector<std::size_t> ready_edges(const Dag& dag,const std::vector<DirectedEdge>& edges,
+                                          bool backward,TieBreakDirection ties){
+  std::vector<std::size_t> order;
+  apply_ready_edges(dag,edges,backward,ties,[&](std::size_t id){order.push_back(id);});
   return order;
 }
 struct Metrics {
@@ -173,6 +183,10 @@ class Engine {
   }
 public:
   Metrics metrics;
+#ifdef TRADER_TEST_HOOKS
+  // Test-only observation of real edge-pop/apply boundaries; no driver overhead.
+  std::function<void(int,DirectedEdge,bool)> observe_batch_edge;
+#endif
   Engine(DirectedWeightedGraph graph,ColorMap colors,std::uint32_t k)
       :graph_(std::move(graph)),colors_(std::move(colors)),k_(k),full_(0){
     if(k<2||k>20)throw std::invalid_argument("k outside supported range 2..20");
@@ -233,8 +247,8 @@ public:
     }
     WitnessStates invalid;
     std::map<DirectedEdge,EdgeUpdate> effective;
-    // Complete the unspecified state-level apply with one shared frontier per
-    // DAG/direction pass, not one global pass across all decomposed DAGs.
+    // Scratch storage is reused, but drained completely for each popped edge.
+    // This is the explicit state-level completion of Algorithm 3's apply().
     std::vector<IndexedStates> pending(k_+1);
     WitnessStates forced;
     auto enqueue=[&](const StateKey& key,StateValue value){
@@ -335,18 +349,28 @@ public:
       if(!seeds.empty())propagate_priority(seeds);
     }else for(const Dag& dag:schedule.dags){
       for(int direction:{1,-1}){
-        {
-          Phase timer(metrics.propagation_ms);forced.clear();
-          if(direction>0)++metrics.dag_forward_passes;else ++metrics.dag_backward_passes;
-          for(auto id:ready_edges(dag,schedule.dependency_edges,direction<0,policy.topological_ties)){
-            auto e=schedule.dependency_edges.at(id);
+        if(direction>0)++metrics.dag_forward_passes;else ++metrics.dag_backward_passes;
+        apply_ready_edges(dag,schedule.dependency_edges,direction<0,policy.topological_ties,[&](std::size_t id){
+          auto e=schedule.dependency_edges.at(id);
+#ifdef TRADER_TEST_HOOKS
+          if(observe_batch_edge)observe_batch_edge(direction,e,false);
+#endif
+          {
+            Phase timer(metrics.propagation_ms);forced.clear();
             if(direction>0)++metrics.forward_edges;else ++metrics.backward_edges;
-            auto update=effective.find(e);if(update==effective.end()||update->second.erase||bit(e.source)==bit(e.destination))continue;
-            StateKey key{e.source,e.destination,bit(e.source)|bit(e.destination)};
-            forced.insert(key);enqueue(key,{update->second.weight,{e.source,e.destination}});
+            // Definition V.1 also includes unchanged induced edges. Apply their
+            // current weights; a deleted or same-color edge has no valid seed.
+            auto weight=graph_.edge_weight(e.source,e.destination);
+            if(weight&&bit(e.source)!=bit(e.destination)){
+              StateKey key{e.source,e.destination,bit(e.source)|bit(e.destination)};
+              forced.insert(key);enqueue(key,{*weight,{e.source,e.destination}});
+            }
           }
-        }
-        drain(direction);
+          drain(direction);
+#ifdef TRADER_TEST_HOOKS
+          if(observe_batch_edge)observe_batch_edge(direction,e,true);
+#endif
+        });
       }
     }
     {
