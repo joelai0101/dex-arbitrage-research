@@ -30,6 +30,9 @@ jobs:
       - name: Check DP, distinct C1/C2, DAG passes and EG on independent oracles
         shell: bash
         run: python trader_paper_faithful/validate.py --compiler "$(command -v c++)" --output "$RUNNER_TEMP/trader-paper-aligned-validation"
+      - name: Reproduce known Algorithm 3 state gap (not an alignment pass)
+        shell: bash
+        run: python trader_paper_faithful/audit_algorithm3.py --compiler "$(command -v c++)" --output "$RUNNER_TEMP/trader-algorithm3-state-audit"
       - name: Preserve diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -38,3 +41,6 @@ jobs:
           path: |
             ${{ runner.temp }}/trader-paper-aligned-validation/validation.json
             ${{ runner.temp }}/trader-paper-aligned-validation/*.log
+            ${{ runner.temp }}/trader-algorithm3-state-audit/audit.json
+            ${{ runner.temp }}/trader-algorithm3-state-audit/*.log
+            ${{ runner.temp }}/trader-algorithm3-state-audit/skip_seen_mutant.cpp
