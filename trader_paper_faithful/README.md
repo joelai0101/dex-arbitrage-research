@@ -8,6 +8,10 @@
 pop/apply 軌跡檢查；小圖／多著色正確性檢查通過。原文未展開的狀態層
 `apply` 仍是明列補足，不宣稱整套複雜度等價。未量測 v2 的 UNI 效能或正式 E2。
 
+同日的狀態層稽核已確認：**v2 不符合將 Operation 4/5 解讀為每個完整
+`(source,destination,colors)` 狀態每 pass 至多改寫一次的條件**。
+這是已重現的差距，不只是尚未證明。下方稽核不修改正式 Engine。
+
 ## 來源與變更範圍
 
 - 主要證據：使用者提供的 IEEE 論文 *TRADER: Real-time Arbitrage Detection
@@ -179,3 +183,58 @@ case 內含 `graph.txt`、`updates.txt`、`colors.txt`、`colors_1.txt` 等。
 
 後續若進入實證，先使用新標籤與新輸出目錄做有界規模評估；官方原版、
 局部修補版與本版必須分開。不得自行合併 PR 或覆寫既有論文數值。
+
+### Algorithm 3 狀態層稽核（2026-10-03）
+
+**原文直接支持：**§V Operations 4–5（IEEE PDF pp.6–7，刊頁 1863–1864；
+技術報告同節）說明，在前驅／相依狀態完成後，每個 state 每 pass 至多
+relax 一次。Algorithm 3 Lines 9、15 則只寫方向性 `apply`，沒有給出
+狀態如何歸屬某條邊、何時收齊候選或跨 DAG／誘導子圖邊界如何傳播的偽碼。
+
+**公開程式核對：**2026-10-03 讀取作者的
+[cycle_detector.cpp](https://github.com/Xtra-Computing/TRADER/blob/main/dynamic_cycle_detection/cycle_detector.cpp)，
+Git blob SHA 為 `b60f470926068daa8fbf7f7448c0d2159dd7deab`。
+其 `process_dynamic_update_by_batch` 合併更新後，按 source 分組，呼叫
+`update_edge_weight` 或重算 source DP；這條執行路徑不是 Algorithm 3
+的 DAG／前後向 ready-edge 排程，不能作為缺失狀態級 apply 的直接規格。
+本輪未據此否定作者未公開的實作或論文整體正確性。
+
+**本實作的反例：**`audit_algorithm3.cpp` 使用原有測試 observer，在每次
+edge apply 前後比較完整 DP。以 `(direction,source,destination,colors)`
+計數嚴格權重變化；每個 fixture 都先確認只含一個 DAG。這是改寫次數的
+下界，不是全部候選 relax 次數；已觀測到兩次嚴格改善就足以否定該條件。
+
+| 案例 | v2 同一狀態的權重軌跡 | 最終完整 DP | 加入 skip-seen 的獨立對照 |
+|---|---|---|---|
+| 四點 diamond，整個匯合區在誘導 DAG 內 | forward：11 → 5 → 2 | 與枚舉 oracle 一致 | forward 留在 5；backward 可補到 2 |
+| 同一 diamond，但末端與兩條後綴邊在誘導 DAG 外 | forward：11 → 5 → 2 | 與枚舉 oracle 一致 | 最終仍是 5，但 oracle 是 2 |
+| 八點、三條同色序列路徑匯合 | forward：12 → 9 → 6 → 3 | 與枚舉 oracle 一致 | 最終仍是 9，但 oracle 是 3 |
+
+四點圖為 `0→1→3` 與 `0→2→3`，顏色為 `(0,1,1,2)`，`k=4`。
+兩條首邊由 10 降為 4、1，兩條後綴邊權重皆為 1；目標狀態為 `(0,3,7)`。
+三路圖為 `0→1→4→7`、`0→2→6→7`、`0→3→5→7`，中間兩層分別
+同色，`k=5`；首邊由 10 降為 7、4、1，其餘邊皆為 1。這些是 DP
+狀態測試，不是套利效能測試；不要求每個顏色都出現在圖中。
+
+負向對照只在輸出目錄生成程式副本：每個 DAG／方向清空 visited 集合，
+在 state pop 時跳過該 pass 已處理的 key，失效修復階段不套用此限制。
+其餘 Engine、圖、更新與 oracle 不變。這證明這個直接修補不正確，
+**不表示所有單次處理演算法都不可能**。
+
+```powershell
+.venv/Scripts/python.exe .worktrees/trader-algorithm3-state-audit/trader_paper_faithful/audit_algorithm3.py --compiler .venv/toolchains/llvm-mingw-20260616-ucrt-x86_64/bin/clang++.exe --output .research_data/common_benchmark/trader_algorithm3_state_audit_20261003/new_run
+```
+
+輸出目錄必須不存在。腳本建立 baseline 與獨立負向對照並保存原始日誌、
+來源 SHA-256、命令及退出碼。baseline 最終 DP 檢查退出 0；加
+`--require-once` 退出 2；skip-seen 對照因答案錯誤退出 1。
+腳本／CI 成功僅表示**重現上述已知差距**；`audit.json` 明列
+`algorithm3_once_per_pass=FAIL`，不能算成演算法已對齊。
+Windows 證據位於 `.research_data/common_benchmark/trader_algorithm3_state_audit_20261003/verified01/`。
+
+**後續設計界線：**必須先定義狀態相依集合與「候選已收齊」的完成條件，
+而非只對邊排序或禁止重訪。依顏色集合大小建立完整狀態相依層次，是可研究
+的補足方向，但不是原文明確指定的 vertex-DAG apply；未實作，也未證明
+與原文工作量等價。v2 測試要求每條邊釋放前清空其傳播前沿，也是本實作
+對 apply 的選擇，不能反過來當成原文必然要求。嚴格重現需要作者補充定義；
+若繼續自訂重建，須明列此方法差異，另驗正確性、狀態處理次數與成本。
