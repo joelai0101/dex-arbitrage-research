@@ -61,7 +61,7 @@ int main(int argc,char** argv){try{
    total.schedule_ms+=m.schedule_ms;total.repair_ms+=m.repair_ms;total.propagation_ms+=m.propagation_ms;total.candidate_ms+=m.candidate_ms;total.classification_ms+=m.classification_ms;
    states+=e.states().size();candidates+=e.ranking().size();links+=e.witness_links();
  }
- std::cout<<std::setprecision(17)<<"{\"method\":\"TRADER-paper-aligned-v1\",\"mode\":\""<<mode<<"\",\"k\":"<<k<<",\"ell\":"<<ell<<",\"batch\":"<<batch
+ std::cout<<std::setprecision(17)<<"{\"method\":\"TRADER-paper-aligned-v2\",\"mode\":\""<<mode<<"\",\"k\":"<<k<<",\"ell\":"<<ell<<",\"batch\":"<<batch
  <<",\"fixed_batch_size\":"<<(mode=="eg"?"null":std::to_string(batch))<<",\"arrival_batch_size\":1,\"eg_enabled\":"<<(mode=="eg"?"true":"false")
  <<",\"rows\":"<<rows<<",\"queries\":"<<queries<<",\"init_ms\":"<<init<<",\"online_ms\":"<<online<<",\"core_ms\":"<<core<<",\"peak_rss_mib\":"<<peak
  <<",\"states\":"<<states<<",\"candidates\":"<<candidates<<",\"witness_links\":"<<links<<",\"queue_pops\":"<<total.popped<<",\"repaired_states\":"<<total.repaired

@@ -111,7 +111,7 @@ def main():
                         w = sum(snapshots[row][e] for e in zip(p, p[1:]))
                         assert abs(float(weight) - expected[row]) < 1e-9 and abs(w - float(weight)) < 1e-9
                 assert metrics['rows'] == 60 and metrics['queries'] == len(expected_rows) - 1
-                assert metrics['method'] == 'TRADER-paper-aligned-v1'
+                assert metrics['method'] == 'TRADER-paper-aligned-v2'
                 assert metrics['eg_enabled'] == (mode == 'eg')
                 assert metrics['fixed_batch_size'] == (None if mode == 'eg' else b)
                 if mode == 'eg':

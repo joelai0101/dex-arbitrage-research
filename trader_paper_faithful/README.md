@@ -1,11 +1,12 @@
 # TRADER paper-aligned implementation
 
 本版本依 TRADER 原文明確描述的機制實作，並揭露必要的正確性補充。
-輸出名稱為 `TRADER-paper-aligned-v1`；它不是官方原版、不是 PR #16 的
+輸出名稱為 `TRADER-paper-aligned-v2`；它不是官方原版、不是 PR #16 的
 局部修補版，也不代表已重現作者論文表格中的效能。
 
-2026-10-03：本輪小圖／多著色正確性檢查通過；未執行完整 UNI 或正式 E2。
-驗收範圍是下列方法對照、固定著色搜尋範圍內的答案與狀態正確性。
+2026-10-03：v2 對齊 Algorithm 3 的逐邊控制流程，新增執行中 DP 與
+pop/apply 軌跡檢查；小圖／多著色正確性檢查通過。原文未展開的狀態層
+`apply` 仍是明列補足，不宣稱整套複雜度等價。未量測 v2 的 UNI 效能或正式 E2。
 
 ## 來源與變更範圍
 
@@ -18,9 +19,12 @@
 - 程式基礎：本研究 repository 的 `a792c8e`，原
   `trader_paper_faithful/`（歷史標籤 `TRADER-paper-contract-v5`）。沿用已存在的
   全端點 DP、候選代表、失效索引及 DAG 排程，不宣稱本輪從零提出它們。
-- 本輪新增：原版失敗案例的具名測試、獨立於正式候選去重函式的環枚舉驗證、
+- v1 新增：原版失敗案例的具名測試、獨立於正式候選去重函式的環枚舉驗證、
   依 Definitions VI.1–2 不另加同色邊豁免、局部排程取邊、快取 C1 有向邊集合、
   跨平台檢查與 CI。
+- v2 以 v1 的 `44fd2a8` 為依賴，只修正 Algorithm 3 的實際執行時機、
+  未改權重的誘導邊 apply、相關回歸與版本標籤。完整路徑、witness 索引、
+  EG 判定、候選代表與多著色常駐契約不在這輪重設範圍。
 - `paper_batch_scheduler.*` 與 `paper_batch_reference_model.*` 保留來源版本；
   後者包含圖結構及獨立 oracle。歷史的 `CorrectnessFirstBatchMaintainer`
   仍在來源中，但正式 `Engine`／串流 driver 不呼叫它或窮舉 oracle。
@@ -32,7 +36,7 @@
 | §IV-A：端點／顏色集合的最小路徑 DP | `Engine`，`StateKey(source,destination,colors)`；不採最小頂點根限制 | 每次維護後，與獨立簡單 colorful 路徑 DFS 核對完整保留狀態及權重 |
 | Algorithm 1：以權重排序的雙向增量傳播 | `apply_single` → `propagate_priority`；只將改善標籤繼續傳播 | 單邊模式 `algorithm1_calls>0`、DAG pass 為 0；混合更新後核對狀態 |
 | Algorithm 2：貪婪、邊互斥的 DAG 分解 | `decompose_into_dags`；依總度數、BFS、加入前檢查環 | 有環輸入分解後，每條排程邊恰好出現一次且每個 DAG 無環 |
-| §V Definition V.1、Algorithm 3：合併、拓樸雙向批次 | 最後到達的同邊更新生效；採端點誘導子圖；每個 DAG 先 forward 再 backward | 檢查未更新的誘導邊、來源／終點佇列的先決條件及反轉合法排序後的相同結果 |
+| §V Definition V.1、Algorithm 3：合併、拓樸雙向批次 | 每個 DAG 先 forward 再 backward；每次 pop 後完成該邊 apply，才釋放相依邊 | 核對真實 pop/apply 軌跡與中途 DP、所有前驅／後繼完成條件、未更新的誘導邊與合法排序變化 |
 | §VI：C1 與其餘候選的可更新最小排序，取得 C2 | 受影響的 DP 閉合代表 → 旋轉去重 → `ranking_`；前兩個不同環產生 gap | 獨立枚舉全部 colorful 環核對前兩個權重、同權不同環、旋轉去重與共用 DP 狀態反例 |
 | Definitions VI.1–2、Algorithm 4：EG | `Grouped`，快取 C1/gap，累積 C1 外降權及 C1 上增權；新邊或累積量嚴格大於 gap 才觸發一般維護 | 等於 gap 可延後、超過則整批刷新；新邊、重複更新、同色邊與實際有向邊歸屬 |
 
@@ -44,11 +48,17 @@
 1. **增權／刪除失效。** 原文 §IV-B 要求處理這些更新，但只靠
    `min(old,new)` 不足以替換已變差的路徑。本版以邊到已選見證的索引找到
    失效狀態，依顏色集合大小重新評估；後續改善再傳播。沒有每次重建全圖。
-2. **Algorithm 3 的狀態層 `apply`。** 原文未展開其實作。本版先安裝
-   合併後的批次最終圖，修復失效見證；每個 DAG／方向的拓樸佇列提供種子，
-   再以顏色集合大小處理該 pass 的狀態前沿。它不是把 Algorithm 1 對每條邊
-   重跑，也不宣稱與作者未公開的狀態排程相同。每個狀態在同一 pass 的同一
-   層最多定案一次；不同 pass 仍可再次改善。
+2. **Algorithm 3 的控制流程與狀態層 `apply`。** v2 的外層直接依
+   Lines 7–18 執行 `pop → apply → release`；`apply_ready_edges` 必須等待
+   DP callback 返回，才將該邊計為完成並解鎖相依邊。v1「整個方向先收集
+   種子、最後才 drain」的方式已移除。每條有效、異色的誘導邊都使用目前
+   權重執行 apply，包括該批未改權重的邊；刪除或同色邊只完成結構排程。
+   原文未展開狀態層 apply。本版保留合併後批次最終圖與失效修復，對每個
+   popped edge 的種子，先按指定方向延伸，再完成較大顏色層的雙端點傳播；
+   狀態前沿在該邊 apply 內清空後才返回。這不是再次執行 Algorithm 1 的
+   權重 PQ，但仍是本研究的明列補足。**同一 DP 狀態可能在同一 DAG pass
+   的不同 edge apply 中再被改善；未證明原文「每個狀態每 pass 至多一次」
+   或原文時間上界。**控制流程測試與最終答案測試不能代替這項證明。
 3. **批次依賴圖。** 採 §V Definition V.1 的頂點誘導版本：更新端點間的
    原有邊也參與排程。Algorithm 3 直接寫入更新集合的簡寫存在解讀空間，
    此處固定一種並公開；不以測量結果事後挑選。刪除邊仍可作為該批結構依賴。
@@ -126,7 +136,7 @@
 只需 C++17 編譯器與 Python 標準函式庫。完整小圖驗證：
 
 ```powershell
-.venv/Scripts/python.exe .worktrees/trader-paper-aligned/trader_paper_faithful/validate.py --compiler .venv/toolchains/llvm-mingw-20260616-ucrt-x86_64/bin/clang++.exe --output .research_data/common_benchmark/trader_paper_aligned_20261003/run01
+.venv/Scripts/python.exe .worktrees/trader-algorithm3-alignment/trader_paper_faithful/validate.py --compiler .venv/toolchains/llvm-mingw-20260616-ucrt-x86_64/bin/clang++.exe --output .research_data/common_benchmark/trader_algorithm3_alignment_20261003/new_run
 ```
 
 輸出目錄必須尚不存在。其他平台可將 `--compiler` 換為 C++17 編譯器的
@@ -144,20 +154,28 @@ case 內含 `graph.txt`、`updates.txt`、`colors.txt`、`colors_1.txt` 等。
 只是介面占位，不是維護組大小；結果明列 `fixed_batch_size=null`，並輸出
 觸發原因、實際維護組大小直方圖與 DAG pass 數量。
 
-### 本輪證據（2026-10-03）
+### v2 本輪證據（2026-10-03）
 
-- release 與 profile **各 547,948 項** C++ 檢查通過。包含保留 DP 狀態、
+- release 與 profile **各 548,106 項** C++ 檢查通過。包含保留 DP 狀態、
   見證合法性、前兩個不同環權重、混合增／降／插／刪及合法排程變化。
-- 7 個具名 gate 通過：共用結束狀態與增權換環、原版 gap 反例、終點 0
-  的即時權重、真正有向邊歸屬與重複更新、單候選刪除、Algorithms 2–3
-  排程、依定義不另加同色邊豁免的 EG 分類。
+- 新增 4 個 Algorithm 3 gate：逐邊 DP apply 完成後才繼續、反向 apply
+  確實更新前綴狀態、未改權重的誘導邊也被 apply、匯合相依條件與失敗邊界。
+  原有 7 個具名 gate 與混合更新／獨立 oracle 檢查保留。
+- 軌跡觀察器僅在單元測試的 `TRADER_TEST_HOOKS` 下存在，不進入正式 driver。
+  同一 DAG 的測試前提由 fixture 明確檢查；不能要求跨 DAG 的固定邊順序。
+- 獨立對照將 Engine 恢復成「整個方向收集種子後才 drain」，其餘 fixture
+  不變，會在第 3 項檢查失敗：`must apply the previous edge before popping
+  another`。這證明測試能攔截舊控制流程，而不是只核對預先計算的邊順序。
 - k=2,3,4,5，各 8 組著色、60 筆更新，single／batch／EG 共 12 組情境；
   release/profile 共 24 次。每個輸出答案與獨立 Python permutation oracle
   核對，並檢查路徑、著色、當前權重與模式路由；兩建置軌跡逐位元相同。
 - `validation.json` 記錄命令、來源 SHA-256、原始測試輸出與情境結果。
-  本地證據在 `.research_data/common_benchmark/trader_paper_aligned_20261003/run01/`。
+  本地通過證據在 `.research_data/common_benchmark/trader_algorithm3_alignment_20261003/green02/`；
+  舊控制流程對照在同層 `red02/`。README 在本地測試後補齊數字；程式／建置
+  檔雜湊不變，CI 另對整個最終提交執行相同驗證。
 - 上述有限測試支持本次驗收，不是所有輸入的形式化證明。
-  尚未完成全量 UNI、80 色效能／記憶體評估或正式 E2，不納入論文主效能表。
+  v2 尚未執行 UNI 效能／記憶體評估或正式 E2，不納入論文主效能表。
+  v1 的 1／2 組著色試跑數字不得轉標為 v2，也不宣稱本修正會減少記憶體。
 
 後續若進入實證，先使用新標籤與新輸出目錄做有界規模評估；官方原版、
 局部修補版與本版必須分開。不得自行合併 PR 或覆寫既有論文數值。
