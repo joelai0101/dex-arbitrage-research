@@ -72,7 +72,8 @@ public:
     void connect(int from,int eid){
         // Topology-only duplicate check, including reactivated historical edges.
         for(int a:states[from].outgoing)if(arcs[a].edge==eid)return;
-        auto edge=edges[eid];int root=states[from].root,used=states[from].mask,u=states[from].u,to=-1;
+        // Read by reference: a copy would duplicate the edge's whole reverse index on every call.
+        const DeltaEdge& edge=edges[eid];int root=states[from].root,used=states[from].mask,u=states[from].u,to=-1;
         if(used==full){
             if(edge.v!=root)return;
             to=states[from].terminal;
